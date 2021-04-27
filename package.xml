@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<package format="2">
+  
+  <name>octomap_server</name>
+  <version>0.0.1</version>
+  <description>Octomap server</description>
+
+  <author email="vojtech.spurny@fel.cvut.cz">Vojtech Spurny</author>
+  <maintainer email="petr.stibinger@fel.cvut.cz">Petr Stibinger</maintainer>
+  
+  <license>BSD 3-Clause</license>
+
+ <buildtool_depend>catkin</buildtool_depend>
+
+  <depend>roscpp</depend>
+  <depend>rmw</depend>
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>visualization_msgs</depend>
+  <depend>pcl_conversions</depend>
+  <depend>pcl_msgs</depend>
+  <depend>octomap_msgs</depend>
+  <depend>octomap_ros</depend>
+  <depend>mrs_lib</depend>
+  <depend>mrs_msgs</depend>
+  <depend>laser_geometry</depend>
+  <depend>nodelet</depend>
+  
+  <export>
+    <nodelet plugin="${prefix}/plugins.xml" />
+  </export>
+
+</package>
