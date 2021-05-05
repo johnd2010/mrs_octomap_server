@@ -1,8 +1,10 @@
-%% <div align="center">
-%%   <h1>OctoMap Server2</h1>
-%%   <h3>Implementation of octomap for ROS2.0 </h3>
-%%     <a href="https://travis-ci.com/iKrishneel/octomap_server2"><img src="https://travis-ci.com/iKrishneel/octomap_server2.svg?branch=master"></a>
-%% </div>
+<!--
+<div align="center">
+    <h1>OctoMap Server2</h1>
+    <h3>Implementation of octomap for ROS2.0 </h3>
+    <a href="https://travis-ci.com/iKrishneel/octomap_server2"><img src="https://travis-ci.com/iKrishneel/octomap_server2.svg?branch=master"></a>
+</div>
+-->
 
 #### Installation
 Firstly make sure you have [octomap](https://github.com/OctoMap/octomap.git) installed on your system 
