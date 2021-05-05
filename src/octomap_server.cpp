@@ -35,7 +35,7 @@
 #include "sensor_msgs/PointCloud2.h"
 #include <memory>
 #include <octomap_server/octomap_server.h>
-#include <mrs_lib/scope_timer.h>
+/* #include <mrs_lib/scope_timer.h> */
 #include <mrs_lib/param_loader.h>
 #include <pcl_ros/transforms.h>
 
@@ -265,8 +265,8 @@ bool OctomapServer::openFile(const std::string& filename) {
 /* OctomapServer::insertLaserScanCallback() //{ */
 
 void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr& scan) {
-  ROS_WARN("[%s]: ---------------------------------------------------- ", ros::this_node::getName().c_str());
-  mrs_lib::ScopeTimer scope_timer("insertLaserScanCallback");
+  /* ROS_WARN("[%s]: ---------------------------------------------------- ", ros::this_node::getName().c_str()); */
+  /* mrs_lib::ScopeTimer scope_timer("insertLaserScanCallback"); */
 
   if (!m_isInitialized) {
     return;
@@ -290,7 +290,7 @@ void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr
     return;
   }
 
-  scope_timer.checkpoint("transform");
+  /* scope_timer.checkpoint("transform"); */
 
   sensor_msgs::PointCloud2 ros_cloud;
   projector_.projectLaser(*scan, ros_cloud);
@@ -318,11 +318,11 @@ void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr
   }
   free_vectors_pc->header.frame_id = m_worldFrameId;
 
-  scope_timer.checkpoint("insert");
+  /* scope_timer.checkpoint("insert"); */
   insertData(sensorToWorldTf.transform.translation, pc, free_vectors_pc);
 
   if (m_localMapping) {
-    scope_timer.checkpoint("clear");
+    /* scope_timer.checkpoint("clear"); */
 
     const octomap::point3d sensor_origin = octomap::pointTfToOctomap(sensorToWorldTf.transform.translation);
     const octomap::point3d p_min         = sensor_origin - octomap::point3d(m_localMapDistance, m_localMapDistance, m_localMapDistance);
@@ -330,7 +330,7 @@ void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr
     clearOutsideBBX(p_min, p_max);
   }
 
-  scope_timer.checkpoint("publish");
+  /* scope_timer.checkpoint("publish"); */
   publishAll(scan->header.stamp);
 }
 
@@ -340,7 +340,7 @@ void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr
 
 void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud) {
   ROS_WARN("[%s]: ---------------------------------------------------- ", ros::this_node::getName().c_str());
-  mrs_lib::ScopeTimer scope_timer("insertCloudCallback");
+  /* mrs_lib::ScopeTimer scope_timer("insertCloudCallback"); */
 
   if (!m_isInitialized) {
     return;
@@ -365,7 +365,7 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
     return;
   }
 
-  scope_timer.checkpoint("transform");
+  /* scope_timer.checkpoint("transform"); */
 
   // directly transform to map frame:
   pcl::transformPointCloud(*pc, *pc, sensorToWorld);
@@ -378,11 +378,11 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
   }
   free_vectors_pc->header.frame_id = m_worldFrameId;
 
-  scope_timer.checkpoint("insert");
+  /* scope_timer.checkpoint("insert"); */
   insertData(sensorToWorldTf.transform.translation, pc, free_vectors_pc);
 
   if (m_localMapping) {
-    scope_timer.checkpoint("clear");
+    /* scope_timer.checkpoint("clear"); */
 
     const octomap::point3d sensor_origin = octomap::pointTfToOctomap(sensorToWorldTf.transform.translation);
     const octomap::point3d p_min         = sensor_origin - octomap::point3d(m_localMapDistance, m_localMapDistance, m_localMapDistance);
@@ -390,7 +390,7 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
     clearOutsideBBX(p_min, p_max);
   }
 
-  scope_timer.checkpoint("publish");
+  /* scope_timer.checkpoint("publish"); */
   publishAll(cloud->header.stamp);
 }
 
@@ -400,7 +400,7 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
 
 void OctomapServer::insertData(const geometry_msgs::Vector3& sensorOriginTf, const PCLPointCloud::ConstPtr& cloud,
                                const PCLPointCloud::ConstPtr& free_vectors_cloud) {
-  mrs_lib::ScopeTimer scope_timer("insertData");
+  /* mrs_lib::ScopeTimer scope_timer("insertData"); */
   octomap::point3d    sensorOrigin = octomap::pointTfToOctomap(sensorOriginTf);
 
   if (!m_octree->coordToKeyChecked(sensorOrigin, m_updateBBXMin) || !m_octree->coordToKeyChecked(sensorOrigin, m_updateBBXMax)) {
@@ -508,7 +508,7 @@ void OctomapServer::insertData(const geometry_msgs::Vector3& sensorOriginTf, con
     }
   }
 
-  scope_timer.checkpoint("markFree");
+  /* scope_timer.checkpoint("markFree"); */
 
   // mark free cells only if not seen occupied in this cloud
   for (auto it = free_cells.begin(), end = free_cells.end(); it != end; ++it) {
@@ -517,14 +517,14 @@ void OctomapServer::insertData(const geometry_msgs::Vector3& sensorOriginTf, con
     }
   }
 
-  scope_timer.checkpoint("markOccupied");
+  /* scope_timer.checkpoint("markOccupied"); */
 
   // now mark all occupied cells:
   for (auto it = occupied_cells.begin(), end = occupied_cells.end(); it != end; it++) {
     m_octree->updateNode(*it, true);
   }
 
-  scope_timer.checkpoint("compress");
+  /* scope_timer.checkpoint("compress"); */
 
   if (m_compressMap) {
     m_octree->prune();
