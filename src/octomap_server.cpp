@@ -282,7 +282,7 @@ void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr
       /* throw "Failed"; */
     }
 
-    sensorToWorldTf = this->m_buffer.lookupTransform(m_worldFrameId, scan->header.frame_id, ros::Time(0));
+    sensorToWorldTf = this->m_buffer.lookupTransform(m_worldFrameId, scan->header.frame_id, scan->header.stamp);
     pcl_ros::transformAsMatrix(sensorToWorldTf.transform, sensorToWorld);
   }
   catch (tf2::TransformException& ex) {
@@ -401,7 +401,7 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
 void OctomapServer::insertData(const geometry_msgs::Vector3& sensorOriginTf, const PCLPointCloud::ConstPtr& cloud,
                                const PCLPointCloud::ConstPtr& free_vectors_cloud) {
   /* mrs_lib::ScopeTimer scope_timer("insertData"); */
-  octomap::point3d    sensorOrigin = octomap::pointTfToOctomap(sensorOriginTf);
+  octomap::point3d sensorOrigin = octomap::pointTfToOctomap(sensorOriginTf);
 
   if (!m_octree->coordToKeyChecked(sensorOrigin, m_updateBBXMin) || !m_octree->coordToKeyChecked(sensorOrigin, m_updateBBXMax)) {
 
@@ -1004,9 +1004,9 @@ void OctomapServer::handlePreNodeTraversal(const ros::Time& rostime) {
       return;
     }
 
-    ROS_INFO("[%s]: Padded MinKey: %d %d %d / padded MaxKey: %d %d %d", ros::this_node::getName().c_str(), m_paddedMinKey[0], m_paddedMinKey[1],
-             m_paddedMinKey[2], paddedMaxKey[0], paddedMaxKey[1], paddedMaxKey[2]);
-    assert(paddedMaxKey[0] >= maxKey[0] && paddedMaxKey[1] >= maxKey[1]);
+    /* ROS_INFO("[%s]: Padded MinKey: %d %d %d / padded MaxKey: %d %d %d", ros::this_node::getName().c_str(), m_paddedMinKey[0], m_paddedMinKey[1], */
+    /* m_paddedMinKey[2], paddedMaxKey[0], paddedMaxKey[1], paddedMaxKey[2]); */
+    /* assert(paddedMaxKey[0] >= maxKey[0] && paddedMaxKey[1] >= maxKey[1]); */
 
     m_multires2DScale     = 1 << (m_treeDepth - m_maxTreeDepth);
     m_gridmap.info.width  = (paddedMaxKey[0] - m_paddedMinKey[0]) / m_multires2DScale + 1;
