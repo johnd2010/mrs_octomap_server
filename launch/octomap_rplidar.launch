@@ -14,7 +14,7 @@
 
     <node pkg="nodelet" type="nodelet" name="octomap_server" args="$(arg nodelet) octomap_server/octomap_server $(arg nodelet_manager)" output="screen">
 
-      <rosparam file="$(find octomap_server)/config/params.yaml" />
+      <rosparam file="$(find octomap_server)/config/params_rplidar.yaml" />
       <param name="uav_name" type="string" value="$(arg UAV_NAME)" />
 
         <!-- topics -->

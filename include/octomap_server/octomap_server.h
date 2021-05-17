@@ -155,6 +155,9 @@ protected:
   bool   m_localMapping;
   double m_localMapDistance;
 
+  bool   m_clearNearby;
+  double m_nearbyClearingDistance;
+
   bool m_updateFreeSpaceUsingMissingData;
 
 
@@ -173,6 +176,7 @@ protected:
   laser_geometry::LaserProjection projector_;
 
   bool clearOutsideBBX(const octomap::point3d& p_min, const octomap::point3d& p_max);
+  bool clearInsideBBX(const octomap::point3d& p_min, const octomap::point3d& p_max);
 
   inline static void updateMinKey(const octomap::OcTreeKey& in, octomap::OcTreeKey& min) {
     for (unsigned i = 0; i < 3; ++i)

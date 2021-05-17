@@ -74,6 +74,9 @@ void OctomapServer::onInit() {
 
   pl.loadParam("local_mapping/enable", m_localMapping, false);
   pl.loadParam("local_mapping/distance", m_localMapDistance, 10.0);
+  
+  pl.loadParam("nearby_clearing/enable", m_clearNearby, false);
+  pl.loadParam("nearby_clearing/distance", m_nearbyClearingDistance, 0.3);
 
   pl.loadParam("visualization/occupancy_min_z", m_occupancyMinZ, std::numeric_limits<double>::lowest());
   pl.loadParam("visualization/occupancy_max_z", m_occupancyMaxZ, std::numeric_limits<double>::max());
@@ -206,7 +209,7 @@ void OctomapServer::onInit() {
   m_isInitialized = true;
   ROS_INFO("[%s]: Initialized", ros::this_node::getName().c_str());
 }
-
+//}
 
 /* OctomapServer::openFile() //{ */
 
@@ -321,13 +324,17 @@ void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr
   /* scope_timer.checkpoint("insert"); */
   insertData(sensorToWorldTf.transform.translation, pc, free_vectors_pc);
 
+  const octomap::point3d sensor_origin = octomap::pointTfToOctomap(sensorToWorldTf.transform.translation);
+  /* scope_timer.checkpoint("clear"); */
   if (m_localMapping) {
-    /* scope_timer.checkpoint("clear"); */
-
-    const octomap::point3d sensor_origin = octomap::pointTfToOctomap(sensorToWorldTf.transform.translation);
-    const octomap::point3d p_min         = sensor_origin - octomap::point3d(m_localMapDistance, m_localMapDistance, m_localMapDistance);
-    const octomap::point3d p_max         = sensor_origin + octomap::point3d(m_localMapDistance, m_localMapDistance, m_localMapDistance);
+    const octomap::point3d p_min = sensor_origin - octomap::point3d(m_localMapDistance, m_localMapDistance, m_localMapDistance);
+    const octomap::point3d p_max = sensor_origin + octomap::point3d(m_localMapDistance, m_localMapDistance, m_localMapDistance);
     clearOutsideBBX(p_min, p_max);
+  }
+  if (m_clearNearby) {
+    const octomap::point3d p_min = sensor_origin - octomap::point3d(m_nearbyClearingDistance, m_nearbyClearingDistance, m_nearbyClearingDistance);
+    const octomap::point3d p_max = sensor_origin + octomap::point3d(m_nearbyClearingDistance, m_nearbyClearingDistance, m_nearbyClearingDistance);
+    clearInsideBBX(p_min, p_max);
   }
 
   /* scope_timer.checkpoint("publish"); */
@@ -357,7 +364,7 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
       /* throw "Failed"; */
     }
 
-    sensorToWorldTf = this->m_buffer.lookupTransform(m_worldFrameId, cloud->header.frame_id, ros::Time(0));
+    sensorToWorldTf = this->m_buffer.lookupTransform(m_worldFrameId, cloud->header.frame_id, cloud->header.stamp);
     pcl_ros::transformAsMatrix(sensorToWorldTf.transform, sensorToWorld);
   }
   catch (tf2::TransformException& ex) {
@@ -381,13 +388,17 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
   /* scope_timer.checkpoint("insert"); */
   insertData(sensorToWorldTf.transform.translation, pc, free_vectors_pc);
 
+  const octomap::point3d sensor_origin = octomap::pointTfToOctomap(sensorToWorldTf.transform.translation);
+  /* scope_timer.checkpoint("clear"); */
   if (m_localMapping) {
-    /* scope_timer.checkpoint("clear"); */
-
-    const octomap::point3d sensor_origin = octomap::pointTfToOctomap(sensorToWorldTf.transform.translation);
-    const octomap::point3d p_min         = sensor_origin - octomap::point3d(m_localMapDistance, m_localMapDistance, m_localMapDistance);
-    const octomap::point3d p_max         = sensor_origin + octomap::point3d(m_localMapDistance, m_localMapDistance, m_localMapDistance);
+    const octomap::point3d p_min = sensor_origin - octomap::point3d(m_localMapDistance, m_localMapDistance, m_localMapDistance);
+    const octomap::point3d p_max = sensor_origin + octomap::point3d(m_localMapDistance, m_localMapDistance, m_localMapDistance);
     clearOutsideBBX(p_min, p_max);
+  }
+  if (m_clearNearby) {
+    const octomap::point3d p_min = sensor_origin - octomap::point3d(m_nearbyClearingDistance, m_nearbyClearingDistance, m_nearbyClearingDistance);
+    const octomap::point3d p_max = sensor_origin + octomap::point3d(m_nearbyClearingDistance, m_nearbyClearingDistance, m_nearbyClearingDistance);
+    clearInsideBBX(p_min, p_max);
   }
 
   /* scope_timer.checkpoint("publish"); */
@@ -913,6 +924,34 @@ bool OctomapServer::clearOutsideBBX(const octomap::point3d& p_min, const octomap
   }
 
   ROS_INFO("[%s]: Number of voxels removed outside local area: %ld", ros::this_node::getName().c_str(), keys.size());
+  return true;
+}
+
+//}
+
+/* OctomapServer::clearInsideBBX() //{ */
+
+bool OctomapServer::clearInsideBBX(const octomap::point3d& p_min, const octomap::point3d& p_max) {
+
+  octomap::OcTreeKey minKey, maxKey;
+  if (!m_octree->coordToKeyChecked(p_min, minKey) || !m_octree->coordToKeyChecked(p_max, maxKey)) {
+    return false;
+  }
+
+  std::vector<std::pair<octomap::OcTreeKey, unsigned int>> keys;
+  for (OcTreeT::leaf_iterator it = m_octree->begin_leafs(), end = m_octree->end_leafs(); it != end; ++it) {
+    // check if inside bbx:
+    octomap::OcTreeKey k = it.getKey();
+    if (k[0] >= minKey[0] && k[1] >= minKey[1] && k[2] >= minKey[2] && k[0] <= maxKey[0] && k[1] <= maxKey[1] && k[2] <= maxKey[2]) {
+      keys.push_back(std::make_pair(k, it.getDepth()));
+    }
+  }
+
+  for (auto k : keys) {
+    m_octree->deleteNode(k.first, k.second);
+  }
+
+  ROS_INFO("[%s]: Number of voxels removed inside local area: %ld", ros::this_node::getName().c_str(), keys.size());
   return true;
 }
 
