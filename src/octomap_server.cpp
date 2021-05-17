@@ -74,7 +74,7 @@ void OctomapServer::onInit() {
 
   pl.loadParam("local_mapping/enable", m_localMapping, false);
   pl.loadParam("local_mapping/distance", m_localMapDistance, 10.0);
-  
+
   pl.loadParam("nearby_clearing/enable", m_clearNearby, false);
   pl.loadParam("nearby_clearing/distance", m_nearbyClearingDistance, 0.3);
 
@@ -923,6 +923,7 @@ bool OctomapServer::clearOutsideBBX(const octomap::point3d& p_min, const octomap
     m_octree->deleteNode(k.first, k.second);
   }
 
+
   ROS_INFO("[%s]: Number of voxels removed outside local area: %ld", ros::this_node::getName().c_str(), keys.size());
   return true;
 }
@@ -938,20 +939,10 @@ bool OctomapServer::clearInsideBBX(const octomap::point3d& p_min, const octomap:
     return false;
   }
 
-  std::vector<std::pair<octomap::OcTreeKey, unsigned int>> keys;
-  for (OcTreeT::leaf_iterator it = m_octree->begin_leafs(), end = m_octree->end_leafs(); it != end; ++it) {
-    // check if inside bbx:
-    octomap::OcTreeKey k = it.getKey();
-    if (k[0] >= minKey[0] && k[1] >= minKey[1] && k[2] >= minKey[2] && k[0] <= maxKey[0] && k[1] <= maxKey[1] && k[2] <= maxKey[2]) {
-      keys.push_back(std::make_pair(k, it.getDepth()));
-    }
+  for (auto it = m_octree->begin_leafs_bbx(p_min, p_max); it != m_octree->end_leafs_bbx(); it++) {
+    m_octree->updateNode(it.getKey(), false);
+    it->updateOccupancyChildren();
   }
-
-  for (auto k : keys) {
-    m_octree->deleteNode(k.first, k.second);
-  }
-
-  ROS_INFO("[%s]: Number of voxels removed inside local area: %ld", ros::this_node::getName().c_str(), keys.size());
   return true;
 }
 
