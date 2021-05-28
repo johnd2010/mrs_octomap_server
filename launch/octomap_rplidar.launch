@@ -1,37 +1,43 @@
 <launch>
 
   <arg name="UAV_NAME" default="$(env UAV_NAME)" />
-  <arg name="standalone" default="true" />
+
   <arg name="debug" default="false" />
+  <arg name="standalone" default="true" />
+  <arg name="custom_config" default="" />
 
   <arg     if="$(eval arg('standalone') or arg('debug'))" name="nodelet" value="standalone" />
   <arg unless="$(eval arg('standalone') or arg('debug'))" name="nodelet" value="load" />
-
   <arg     if="$(eval arg('standalone') or arg('debug'))" name="nodelet_manager" value="" />
-  <arg unless="$(eval arg('standalone') or arg('debug'))" name="nodelet_manager" value="$(arg UAV_NAME)_nodelet_manager" />
+  <arg unless="$(eval arg('standalone') or arg('debug'))" name="nodelet_manager" value="$(arg UAV_NAME)_mapping_nodelet_manager" />
 
   <group ns="$(arg UAV_NAME)">
 
     <node pkg="nodelet" type="nodelet" name="octomap_server" args="$(arg nodelet) octomap_server/octomap_server $(arg nodelet_manager)" output="screen">
 
       <rosparam file="$(find octomap_server)/config/params_rplidar.yaml" />
+
+      <rosparam if="$(eval not arg('custom_config') == '')" file="$(arg custom_config)" />
+
       <param name="uav_name" type="string" value="$(arg UAV_NAME)" />
 
+      <param name="frame_id" type="string" value="$(arg UAV_NAME)/stable_origin" />
+
         <!-- topics -->
-      <remap from="~laser_scan_in" to="/$(arg UAV_NAME)/rplidar/scan" />
-      <remap from="~octomap_binary_out" to="/$(arg UAV_NAME)/octomap_server/octomap_binary" />
-      <remap from="~octomap_full_out" to="/$(arg UAV_NAME)/octomap_server/octomap_full" />
-      <remap from="~occupied_cells_via_array_out" to="/$(arg UAV_NAME)/octomap_server/occupied_cells_via_array" />
-      <remap from="~free_cells_via_array_out" to="/$(arg UAV_NAME)/octomap_server/free_cells_via_array" />
-      <remap from="~octomap_point_cloud_centers_out" to="/$(arg UAV_NAME)/octomap_server/octomap_point_cloud_centers" />
-      <remap from="~octomap_free_centers_out" to="/$(arg UAV_NAME)/octomap_server/octomap_free_centers" />
-      <remap from="~projected_map_out" to="/$(arg UAV_NAME)/octomap_server/projected_map" />
+      <remap from="~laser_scan_in" to="rplidar/scan" />
+      <remap from="~octomap_binary_out" to="octomap_server/octomap_binary" />
+      <remap from="~octomap_full_out" to="octomap_server/octomap_full" />
+      <remap from="~occupied_cells_via_array_out" to="octomap_server/occupied_cells_via_array" />
+      <remap from="~free_cells_via_array_out" to="octomap_server/free_cells_via_array" />
+      <remap from="~octomap_point_cloud_centers_out" to="octomap_server/octomap_point_cloud_centers" />
+      <remap from="~octomap_free_centers_out" to="octomap_server/octomap_free_centers" />
+      <remap from="~projected_map_out" to="octomap_server/projected_map" />
 
         <!-- services -->
-      <remap from="~octomap_binary" to="/$(arg UAV_NAME)/octomap_server/octomap_binary" />
-      <remap from="~octomap_full" to="/$(arg UAV_NAME)/octomap_server/octomap_full" />
-      <remap from="~clear_bbx" to="/$(arg UAV_NAME)/octomap_server/clear_bbx" />
-      <remap from="~reset" to="/$(arg UAV_NAME)/octomap_server/reset" />
+      <remap from="~octomap_binary" to="octomap_server/octomap_binary" />
+      <remap from="~octomap_full" to="octomap_server/octomap_full" />
+      <remap from="~clear_bbx" to="octomap_server/clear_bbx" />
+      <remap from="~reset" to="octomap_server/reset" />
 
     </node>
 

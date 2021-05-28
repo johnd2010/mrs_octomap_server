@@ -923,7 +923,6 @@ bool OctomapServer::clearOutsideBBX(const octomap::point3d& p_min, const octomap
     m_octree->deleteNode(k.first, k.second);
   }
 
-
   ROS_INFO("[%s]: Number of voxels removed outside local area: %ld", ros::this_node::getName().c_str(), keys.size());
   return true;
 }
@@ -939,10 +938,20 @@ bool OctomapServer::clearInsideBBX(const octomap::point3d& p_min, const octomap:
     return false;
   }
 
-  for (auto it = m_octree->begin_leafs_bbx(p_min, p_max); it != m_octree->end_leafs_bbx(); it++) {
-    m_octree->updateNode(it.getKey(), false);
-    it->updateOccupancyChildren();
+  std::vector<std::pair<octomap::OcTreeKey, unsigned int>> keys;
+  for (OcTreeT::leaf_iterator it = m_octree->begin_leafs(), end = m_octree->end_leafs(); it != end; ++it) {
+    // check if outside of bbx:
+    octomap::OcTreeKey k = it.getKey();
+    if (k[0] >= minKey[0] && k[1] >= minKey[1] && k[2] >= minKey[2] && k[0] <= maxKey[0] && k[1] <= maxKey[1] && k[2] <= maxKey[2]) {
+      keys.push_back(std::make_pair(k, it.getDepth()));
+    }
   }
+
+  for (auto k : keys) {
+    m_octree->setNodeValue(k.first, -1.0);
+    /* m_octree->updateNode(k.first, false); */
+  }
+
   return true;
 }
 
