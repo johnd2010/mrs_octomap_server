@@ -1,6 +1,5 @@
 resolution: 0.20
 compress_map: true
-update_free_space_using_missing_data: true
 
 sensor_model:
 

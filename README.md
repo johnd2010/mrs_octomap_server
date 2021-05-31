@@ -7,15 +7,17 @@
 -->
 
 #### Installation
+
 Firstly make sure you have [octomap](https://github.com/OctoMap/octomap.git) installed on your system 
 
 ```bash
-sudo apt install ros-noetic-octomap
+sudo apt install ros-noetic-octomap ros-noetic-octomap-server
 ```
 
 Clone the repository to the workspace and build with catkin
 
 #### Running
+
 Launch the node with appropriate input on topic `cloud_in` or `laser_scan_in`
 Make sure, that the correct fixed frame set in `config/params.yaml`
 

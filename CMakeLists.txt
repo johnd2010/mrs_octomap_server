@@ -1,41 +1,34 @@
 cmake_minimum_required(VERSION 3.5)
-project(octomap_server)
+project(mrs_octomap_server)
 
-find_package(catkin REQUIRED COMPONENTS
+set(PACKAGE_DEPENDENCIES
   roscpp
+  nodelet
   sensor_msgs
   std_msgs
   nav_msgs
   geometry_msgs
   visualization_msgs
-  std_srvs
-  pcl_ros
   pcl_conversions
-  message_filters
   octomap_ros
   octomap_msgs
-  tf2
-  tf2_ros
-  tf2_msgs
   mrs_lib
   laser_geometry
-  nodelet
   )
 
-add_definitions("-fdiagnostics-color=always -g -DEIGEN_INITIALIZE_MATRICES_BY_NAN")
+find_package(catkin REQUIRED COMPONENTS ${PACKAGE_DEPENDENCIES})
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-
-add_compile_options("-Wall")
-add_compile_options("-Wextra")
-add_compile_options(${PCL_COMPILE_OPTIONS})
-
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3")
+add_compile_options("-fPIC")
+# add_compile_options(${PCL_COMPILE_OPTIONS})
 
 find_package(OpenMP REQUIRED)
+
+find_package(octomap REQUIRED)
+add_definitions(-DOCTOMAP_NODEBUGOUT)
 
 # include Eigen3
 find_package(Eigen3 REQUIRED)
@@ -43,40 +36,51 @@ set(Eigen_INCLUDE_DIRS ${EIGEN3_INCLUDE_DIRS})
 set(Eigen_LIBRARIES ${Eigen_LIBRARIES})
 
 catkin_package(
-  CATKIN_DEPENDS mrs_msgs
-)
+  INCLUDE_DIRS include
+  LIBRARIES MrsOctomapConversions MrsOctomapServer
+  CATKIN_DEPENDS ${PACKAGE_DEPENDENCIES}
+  DEPENDS OCTOMAP
+  )
 
-# include include
 include_directories(
   include
   ${catkin_INCLUDE_DIRS}
   ${Eigen_INCLUDE_DIRS}
   ${PCL_INCLUDE_DIRS}
+  ${OCTOMAP_INCLUDE_DIRS}
   )
 
-add_library(OctomapConversions SHARED
+# MrsOctomapConversions
+
+add_library(MrsOctomapConversions SHARED
   src/conversions.cpp
   )
-add_dependencies(OctomapConversions
+
+add_dependencies(MrsOctomapConversions
   ${${PROJECT_NAME}_EXPORTED_TARGETS}
   ${catkin_EXPORTED_TARGETS}
-  )
-target_link_libraries(OctomapConversions
-  ${catkin_LIBRARIES}
-  ${PCL_LIBRARIES}
-  # ${OCTOMAP_LIBRARIES}
   )
 
-add_library(octomap_server SHARED
+target_link_libraries(MrsOctomapConversions
+  ${catkin_LIBRARIES}
+  ${PCL_LIBRARIES}
+  ${OCTOMAP_LIBRARIES}
+  )
+
+# MrsOctomapServer
+
+add_library(MrsOctomapServer SHARED
   src/octomap_server.cpp
   )
-add_dependencies(octomap_server
+
+add_dependencies(MrsOctomapServer
   ${${PROJECT_NAME}_EXPORTED_TARGETS}
   ${catkin_EXPORTED_TARGETS}
   )
-target_link_libraries(octomap_server
-  OctomapConversions
+
+target_link_libraries(MrsOctomapServer
+  MrsOctomapConversions
   ${catkin_LIBRARIES}
   ${PCL_LIBRARIES}
-  # ${OCTOMAP_LIBRARIES}
+  ${OCTOMAP_LIBRARIES}
   )

@@ -68,12 +68,13 @@
 #include <octomap/octomap.h>
 #include <octomap/OcTreeKey.h>
 
-#include <octomap_server/conversions.h>
+#include <mrs_octomap_server/conversions.h>
 
 #include <laser_geometry/laser_geometry.h>
 
-namespace octomap_server
+namespace mrs_octomap_server
 {
+
 class OctomapServer : public nodelet::Nodelet {
 
 public:
@@ -264,6 +265,7 @@ protected:
             oldMapInfo.origin.position.y != newMapInfo.origin.position.y);
   }
 };
+
 }  // namespace octomap_server
 
 #endif  // _OCTOMAP_SERVER_HPP_

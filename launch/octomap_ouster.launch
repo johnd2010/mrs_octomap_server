@@ -3,7 +3,7 @@
   <arg name="UAV_NAME" default="$(env UAV_NAME)" />
 
   <arg name="debug" default="false" />
-  <arg name="standalone" default="true" />
+  <arg name="standalone" default="false" />
   <arg name="custom_config" default="" />
 
   <arg     if="$(arg debug)" name="launch_prefix" value="debug_roslaunch" />
@@ -16,16 +16,16 @@
 
   <group ns="$(arg UAV_NAME)">
 
-    <node pkg="nodelet" type="nodelet" name="octomap_server" args="$(arg nodelet) octomap_server/octomap_server $(arg nodelet_manager)" output="screen" launch-prefix="$(arg launch_prefix)">
+    <node pkg="nodelet" type="nodelet" name="octomap_server" args="$(arg nodelet) mrs_octomap_server/MrsOctomapServer $(arg nodelet_manager)" output="screen" launch-prefix="$(arg launch_prefix)">
 
-      <rosparam file="$(find octomap_server)/config/params_ouster.yaml" />
+      <rosparam file="$(find mrs_octomap_server)/config/params_ouster.yaml" />
 
       <param name="uav_name" type="string" value="$(arg UAV_NAME)" />
 
-      <param name="frame_id" type="string" value="$(arg UAV_NAME)/stable_origin" />
+      <param name="frame_id" type="string" value="$(arg UAV_NAME)/gps_origin" />
 
         <!-- topics -->
-      <remap from="~point_cloud_in" to="os_cloud_nodelet/points" />
+      <remap from="~point_cloud_in" to="os_cloud_nodelet/points_processed" />
       <remap from="~octomap_binary_out" to="octomap_server/octomap_binary" />
       <remap from="~octomap_full_out" to="octomap_server/octomap_full" />
       <remap from="~occupied_cells_via_array_out" to="octomap_server/occupied_cells_via_array" />

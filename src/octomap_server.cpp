@@ -1,53 +1,27 @@
-/*
- * Copyright (c) 2010-2013, A. Hornung, University of Freiburg
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- *     * Redistributions of source code must retain the above copyright
- *       notice, this list of conditions and the following disclaimer.
- *     * Redistributions in binary form must reproduce the above copyright
- *       notice, this list of conditions and the following disclaimer in the
- *       documentation and/or other materials provided with the distribution.
- *     * Neither the name of the University of Freiburg nor the names of its
- *       contributors may be used to endorse or promote products derived from
- *       this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
- * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
- * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE
- * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
- * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
- * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
- * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
- * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
- * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
- */
-
-#include "octomap_msgs/BoundingBoxQueryRequest.h"
-#include "octomap_msgs/GetOctomapRequest.h"
-#include "ros/this_node.h"
-#include "ros/transport_hints.h"
-#include "sensor_msgs/LaserScan.h"
-#include "sensor_msgs/PointCloud2.h"
+#include <ros/init.h>
+#include <octomap_msgs/BoundingBoxQueryRequest.h>
+#include <octomap_msgs/GetOctomapRequest.h>
+#include <ros/this_node.h>
+#include <ros/transport_hints.h>
+#include <sensor_msgs/LaserScan.h>
+#include <sensor_msgs/PointCloud2.h>
 #include <memory>
-#include <octomap_server/octomap_server.h>
-/* #include <mrs_lib/scope_timer.h> */
+#include <mrs_octomap_server/octomap_server.h>
+#include <mrs_lib/scope_timer.h>
 #include <mrs_lib/param_loader.h>
 #include <pcl_ros/transforms.h>
 
 namespace ph = std::placeholders;
 
-namespace octomap_server
+namespace mrs_octomap_server
 {
 
 /* Class OctomapServer: onInit //{ */
 
 void OctomapServer::onInit() {
+
   nh_ = nodelet::Nodelet::getMTPrivateNodeHandle();
+
   ros::Time::waitForValid();
 
   mrs_lib::ParamLoader pl(nh_, ros::this_node::getName());
@@ -203,10 +177,11 @@ void OctomapServer::onInit() {
 
   if (!pl.loadedSuccessfully()) {
     ROS_ERROR("[%s]: Could not load all non-optional parameters. Shutting down.", ros::this_node::getName().c_str());
-    ros::shutdown();
+    ros::requestShutdown();
   }
 
   m_isInitialized = true;
+
   ROS_INFO("[%s]: Initialized", ros::this_node::getName().c_str());
 }
 //}
@@ -268,8 +243,9 @@ bool OctomapServer::openFile(const std::string& filename) {
 /* OctomapServer::insertLaserScanCallback() //{ */
 
 void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr& scan) {
+
   /* ROS_WARN("[%s]: ---------------------------------------------------- ", ros::this_node::getName().c_str()); */
-  /* mrs_lib::ScopeTimer scope_timer("insertLaserScanCallback"); */
+  mrs_lib::ScopeTimer scope_timer("insertLaserScanCallback");
 
   if (!m_isInitialized) {
     return;
@@ -293,7 +269,7 @@ void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr
     return;
   }
 
-  /* scope_timer.checkpoint("transform"); */
+  scope_timer.checkpoint("transform");
 
   sensor_msgs::PointCloud2 ros_cloud;
   projector_.projectLaser(*scan, ros_cloud);
@@ -321,7 +297,7 @@ void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr
   }
   free_vectors_pc->header.frame_id = m_worldFrameId;
 
-  /* scope_timer.checkpoint("insert"); */
+  scope_timer.checkpoint("insert");
   insertData(sensorToWorldTf.transform.translation, pc, free_vectors_pc);
 
   const octomap::point3d sensor_origin = octomap::pointTfToOctomap(sensorToWorldTf.transform.translation);
@@ -346,8 +322,10 @@ void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr
 /* OctomapServer::insertCloudCallback() //{ */
 
 void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud) {
+
   ROS_WARN("[%s]: ---------------------------------------------------- ", ros::this_node::getName().c_str());
-  /* mrs_lib::ScopeTimer scope_timer("insertCloudCallback"); */
+
+  mrs_lib::ScopeTimer scope_timer("insertCloudCallback");
 
   if (!m_isInitialized) {
     return;
@@ -374,6 +352,7 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
 
   /* scope_timer.checkpoint("transform"); */
 
+  scope_timer.checkpoint("clear");
   // directly transform to map frame:
   pcl::transformPointCloud(*pc, *pc, sensorToWorld);
   pc->header.frame_id = m_worldFrameId;
@@ -390,18 +369,20 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
 
   const octomap::point3d sensor_origin = octomap::pointTfToOctomap(sensorToWorldTf.transform.translation);
   /* scope_timer.checkpoint("clear"); */
+
   if (m_localMapping) {
     const octomap::point3d p_min = sensor_origin - octomap::point3d(m_localMapDistance, m_localMapDistance, m_localMapDistance);
     const octomap::point3d p_max = sensor_origin + octomap::point3d(m_localMapDistance, m_localMapDistance, m_localMapDistance);
     clearOutsideBBX(p_min, p_max);
   }
+
   if (m_clearNearby) {
     const octomap::point3d p_min = sensor_origin - octomap::point3d(m_nearbyClearingDistance, m_nearbyClearingDistance, m_nearbyClearingDistance);
     const octomap::point3d p_max = sensor_origin + octomap::point3d(m_nearbyClearingDistance, m_nearbyClearingDistance, m_nearbyClearingDistance);
     clearInsideBBX(p_min, p_max);
   }
 
-  /* scope_timer.checkpoint("publish"); */
+  scope_timer.checkpoint("publish");
   publishAll(cloud->header.stamp);
 }
 
@@ -411,142 +392,78 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
 
 void OctomapServer::insertData(const geometry_msgs::Vector3& sensorOriginTf, const PCLPointCloud::ConstPtr& cloud,
                                const PCLPointCloud::ConstPtr& free_vectors_cloud) {
-  /* mrs_lib::ScopeTimer scope_timer("insertData"); */
-  octomap::point3d sensorOrigin = octomap::pointTfToOctomap(sensorOriginTf);
+
+  mrs_lib::ScopeTimer scope_timer("insertData");
+
+  const octomap::point3d sensorOrigin = octomap::pointTfToOctomap(sensorOriginTf);
 
   if (!m_octree->coordToKeyChecked(sensorOrigin, m_updateBBXMin) || !m_octree->coordToKeyChecked(sensorOrigin, m_updateBBXMax)) {
-
-    ROS_ERROR("[%s]: Could not generate Key for origin", ros::this_node::getName().c_str());
+    ROS_ERROR_STREAM("Could not generate Key for origin " << sensorOrigin);
   }
 
-#ifdef COLOR_OCTOMAP_SERVER
-  unsigned char* colors = new unsigned char[3];
-#endif
+  const float free_space_ray_len = 20.0;
 
-  octomap::KeySet free_cells, occupied_cells;
-  // update free space using missing data
-  for (auto it = free_vectors_cloud->begin(); it != free_vectors_cloud->end(); ++it) {
-    octomap::point3d point(it->x, it->y, it->z);
-    // maxrange check
-    point = sensorOrigin + (point - sensorOrigin).normalized() * m_maxRange;
+  // instead of direct scan insertion, compute probabilistic update
+  octomap::KeySet     free_cells, occupied_cells;
+  const bool free_space_bounded = free_space_ray_len > 0.0f;
 
-    if (m_octree->computeRayKeys(sensorOrigin, point, m_keyRay)) {
-      free_cells.insert(m_keyRay.begin(), m_keyRay.end());
+  scope_timer.checkpoint("sortingThroughPoints");
+
+  // all points: free on ray, occupied on endpoint:
+  for (PCLPointCloud::const_iterator it = cloud->begin(); it != cloud->end(); ++it) {
+    if (!(std::isfinite(it->x) && std::isfinite(it->y) && std::isfinite(it->z))) {
+      continue;
     }
 
-    octomap::OcTreeKey endKey;
-    if (m_octree->coordToKeyChecked(point, endKey)) {
-      updateMinKey(endKey, m_updateBBXMin);
-      updateMaxKey(endKey, m_updateBBXMax);
-    } else {
-      ROS_ERROR("[%s]: Could not generate Key for origin", ros::this_node::getName().c_str());
+    octomap::point3d         point(it->x, it->y, it->z);
+    octomap::KeyRay keyRay;
+    const float     d = (point - sensorOrigin).norm();
+
+    if (free_space_bounded) {
+
+      // move end point to distance min(free space ray len, current distance)
+      point = sensorOrigin + (point - sensorOrigin).normalize() * std::min(free_space_ray_len, d);
     }
-  }
 
-  for (auto it = cloud->begin(); it != cloud->end(); ++it) {
-    octomap::point3d point(it->x, it->y, it->z);
-    // filter ground if neccessary
-    if (m_filterGroundPlane && it->z <= m_ZGroundFilterDistance) {
-      // maxrange check
-      if ((m_maxRange < 0.0) || ((point - sensorOrigin).norm() <= m_maxRange)) {
-        // free cells
-        if (m_octree->computeRayKeys(sensorOrigin, point, m_keyRay)) {
-          free_cells.insert(m_keyRay.begin(), m_keyRay.end());
-        }
+    // Occupied end point (only when measured point is reached)
+    if (!free_space_bounded || d < free_space_ray_len) {
 
-        // occupied endpoint
-        octomap::OcTreeKey key;
-        if (m_octree->coordToKeyChecked(point, key)) {
-          free_cells.insert(key);
+      octomap::OcTreeKey key;
+      if (m_octree->coordToKeyChecked(point, key)) {
+        occupied_cells.insert(key);
 
-          updateMinKey(key, m_updateBBXMin);
-          updateMaxKey(key, m_updateBBXMax);
-        }
-      } else {
-        // ray longer than maxrange:;
-        octomap::point3d new_end = sensorOrigin + (point - sensorOrigin).normalized() * m_maxRange;
-        if (m_octree->computeRayKeys(sensorOrigin, new_end, m_keyRay)) {
-          free_cells.insert(m_keyRay.begin(), m_keyRay.end());
-
-          octomap::OcTreeKey endKey;
-          if (m_octree->coordToKeyChecked(new_end, endKey)) {
-            free_cells.insert(endKey);
-            updateMinKey(endKey, m_updateBBXMin);
-            updateMaxKey(endKey, m_updateBBXMax);
-          } else {
-            ROS_ERROR("[%s]: Could not generate Key for endpoint", ros::this_node::getName().c_str());
-          }
-        }
-      }
-      // all other points: free on ray, occupied on endpoint:
-    } else {
-      // maxrange check
-      if ((m_maxRange < 0.0) || ((point - sensorOrigin).norm() <= m_maxRange)) {
-        // free cells
-        if (m_octree->computeRayKeys(sensorOrigin, point, m_keyRay)) {
-          free_cells.insert(m_keyRay.begin(), m_keyRay.end());
-        }
-
-        // occupied endpoint
-        octomap::OcTreeKey key;
-        if (m_octree->coordToKeyChecked(point, key)) {
-          occupied_cells.insert(key);
-
-          updateMinKey(key, m_updateBBXMin);
-          updateMaxKey(key, m_updateBBXMax);
-
-#ifdef COLOR_OCTOMAP_SERVER
-          // NB: Only read and interpret color if it's an occupied node
-          m_octree->averageNodeColor(it->x, it->y, it->z, it->r, it->g, it->b);
-#endif
-        }
-      } else {
-        // ray longer than maxrange:;
-        octomap::point3d new_end = sensorOrigin + (point - sensorOrigin).normalized() * m_maxRange;
-        if (m_octree->computeRayKeys(sensorOrigin, new_end, m_keyRay)) {
-          free_cells.insert(m_keyRay.begin(), m_keyRay.end());
-
-          octomap::OcTreeKey endKey;
-          if (m_octree->coordToKeyChecked(new_end, endKey)) {
-            free_cells.insert(endKey);
-            updateMinKey(endKey, m_updateBBXMin);
-            updateMaxKey(endKey, m_updateBBXMax);
-          } else {
-            ROS_ERROR("[%s]: Could not generate Key for endpoint", ros::this_node::getName().c_str());
-          }
-        }
+        updateMinKey(key, m_updateBBXMin);
+        updateMaxKey(key, m_updateBBXMax);
       }
     }
+
+    // free cells
+    if (m_octree->computeRayKeys(sensorOrigin, point, keyRay)) {
+      free_cells.insert(keyRay.begin(), keyRay.end());
+    }
   }
 
-  /* scope_timer.checkpoint("markFree"); */
+  scope_timer.checkpoint("markingFree");
 
   // mark free cells only if not seen occupied in this cloud
-  for (auto it = free_cells.begin(), end = free_cells.end(); it != end; ++it) {
+  for (octomap::KeySet::iterator it = free_cells.begin(), end = free_cells.end(); it != end; ++it) {
     if (occupied_cells.find(*it) == occupied_cells.end()) {
       m_octree->updateNode(*it, false);
     }
   }
 
-  /* scope_timer.checkpoint("markOccupied"); */
+  scope_timer.checkpoint("markingOcuppied");
 
   // now mark all occupied cells:
-  for (auto it = occupied_cells.begin(), end = occupied_cells.end(); it != end; it++) {
+  for (octomap::KeySet::iterator it = occupied_cells.begin(), end = occupied_cells.end(); it != end; it++) {
     m_octree->updateNode(*it, true);
   }
 
-  /* scope_timer.checkpoint("compress"); */
+  scope_timer.checkpoint("compresssing");
 
   if (m_compressMap) {
     m_octree->prune();
   }
-
-#ifdef COLOR_OCTOMAP_SERVER
-  if (colors) {
-    delete[] colors;
-    colors = NULL;
-  }
-#endif
 }
 
 //}
@@ -1315,7 +1232,7 @@ std_msgs::ColorRGBA OctomapServer::heightMapColor(double h) {
 
 //}
 
-}  // namespace octomap_server
+}  // namespace mrs_octomap_server
 
 #include <pluginlib/class_list_macros.h>
-PLUGINLIB_EXPORT_CLASS(octomap_server::OctomapServer, nodelet::Nodelet)
+PLUGINLIB_EXPORT_CLASS(mrs_octomap_server::OctomapServer, nodelet::Nodelet)

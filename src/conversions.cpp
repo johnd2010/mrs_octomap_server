@@ -37,7 +37,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <octomap_server/conversions.h>
+#include <mrs_octomap_server/conversions.h>
 #include <sensor_msgs/point_cloud2_iterator.h>
 
 namespace octomap
@@ -52,6 +52,7 @@ namespace octomap
  * @param cloud
  */
 void pointsOctomapToPointCloud2(const point3d_list& points, sensor_msgs::PointCloud2& cloud) {
+
   // make sure the channel is valid
   std::vector<sensor_msgs::PointField>::const_iterator field_iter = cloud.fields.begin(), field_end = cloud.fields.end();
 
