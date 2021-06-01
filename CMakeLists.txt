@@ -14,6 +14,7 @@ set(PACKAGE_DEPENDENCIES
   octomap_msgs
   mrs_lib
   laser_geometry
+  ouster_ros
   )
 
 find_package(catkin REQUIRED COMPONENTS ${PACKAGE_DEPENDENCIES})
@@ -23,7 +24,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_compile_options("-fPIC")
-# add_compile_options(${PCL_COMPILE_OPTIONS})
+add_compile_options("${PCL_COMPILE_OPTIONS}")
 
 find_package(OpenMP REQUIRED)
 

@@ -1,27 +1,33 @@
-resolution: 0.20
+resolution: 0.4
 compress_map: true
+
+update_free_space_using_missing_data: true
+
+# for point cloud raycasting
+sensor_params:
+
+  enabled: true
+  vertical_fov_angle: deg(45)
+  vertical_rays: 16
+  horizontal_rays: 2048
 
 sensor_model:
 
-  max_range: 20 # set to -1.0 for unlimited range
+  max_range: 40.0
 
-  hit: 0.95  # [0, 1]
-  miss: 0.4 # [0, 1]
-  min: 0.0  # [0, 1]
-  max: 1.0  # [0, 1]
+  hit: 0.90  # [0, 1]
+  miss: 0.30 # [0, 1]
+  min: 0.10  # [0, 1]
+  max: 0.90  # [0, 1]
 
 filter_speckles: false
 
-ground_filter:
-  enable: false
-  distance: 0.6
-
 local_mapping:
-  enable: true
-  distance: 14.0
+  enable: false
+  distance: 40.0
 
 nearby_clearing:
-  enable: true
+  enable: false
   distance: 1.0
 
 visualization:
