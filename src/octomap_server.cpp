@@ -543,7 +543,7 @@ void OctomapServer::insertData(const geometry_msgs::Vector3& sensorOriginTf, con
 
     // free cells
     if (m_octree->computeRayKeys(sensorOrigin, measured_point, keyRay)) {
-      free_cells.insert(keyRay.begin(), keyRay.end()-2);
+      free_cells.insert(keyRay.begin(), keyRay.end());
     }
   }
 
