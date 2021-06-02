@@ -1,4 +1,4 @@
-resolution: 0.4
+resolution: 1.00
 compress_map: true
 
 update_free_space_using_missing_data: true
@@ -17,8 +17,8 @@ sensor_model:
 
   hit: 0.90  # [0, 1]
   miss: 0.30 # [0, 1]
-  min: 0.10  # [0, 1]
-  max: 0.90  # [0, 1]
+  min: 0.05  # [0, 1]
+  max: 0.95  # [0, 1]
 
 filter_speckles: false
 

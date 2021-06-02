@@ -543,7 +543,33 @@ void OctomapServer::insertData(const geometry_msgs::Vector3& sensorOriginTf, con
 
     // free cells
     if (m_octree->computeRayKeys(sensorOrigin, measured_point, keyRay)) {
-      free_cells.insert(keyRay.begin(), keyRay.end());
+      free_cells.insert(keyRay.begin(), keyRay.end()-2);
+    }
+  }
+
+  for (PCLPointCloud::const_iterator it = free_vectors_cloud->begin(); it != free_vectors_cloud->end(); ++it) {
+
+    if (!(std::isfinite(it->x) && std::isfinite(it->y) && std::isfinite(it->z))) {
+      continue;
+    }
+
+    octomap::point3d measured_point(it->x, it->y, it->z);
+    octomap::KeyRay  keyRay;
+
+    // check if the ray intersects a cell in the occupied list
+    if (m_octree->computeRayKeys(sensorOrigin, measured_point, keyRay)) {
+
+      bool ray_is_cool = true;
+      for (octomap::KeyRay::iterator it2 = keyRay.begin(), end = keyRay.end(); it2 != end; ++it2) {
+        if (occupied_cells.find(*it2) != occupied_cells.end()) {
+          ray_is_cool = false;
+          break;
+        }
+      }
+
+      if (ray_is_cool) {
+        free_cells.insert(keyRay.begin(), keyRay.end());
+      }
     }
   }
 
@@ -722,21 +748,29 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
 
       if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z)) {
 
-        const float  max_dist = 40.0;
+        const float  max_dist = 20.0;
         const vec3_t ray_vec  = m_sensor_xyz_lut.directions.col(i);
 
-        pc->at(i).x = ray_vec(0) * max_dist;
-        pc->at(i).y = ray_vec(1) * max_dist;
-        pc->at(i).z = ray_vec(2) * max_dist;
+        if (ray_vec(2) > 0.0) {
+          pt.x = ray_vec(0) * max_dist;
+          pt.y = ray_vec(1) * max_dist;
+          pt.z = ray_vec(2) * max_dist;
+          
+          free_vectors_pc->push_back(pt);
+        }
       }
     }
-
-    /* free_vectors_pc->header.frame_id = m_worldFrameId; */
   }
 
-  // directly transform to map frame:
+  free_vectors_pc->header = pc->header;
+
+  // transform to the map frame
+
   pcl::transformPointCloud(*pc, *pc, sensorToWorld);
-  pc->header.frame_id = m_worldFrameId;
+  pcl::transformPointCloud(*free_vectors_pc, *free_vectors_pc, sensorToWorld);
+
+  pc->header.frame_id              = m_worldFrameId;
+  free_vectors_pc->header.frame_id = m_worldFrameId;
 
   /* scope_timer.checkpoint("insertData"); */
 
