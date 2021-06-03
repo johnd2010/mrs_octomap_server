@@ -749,7 +749,7 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
 
       if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z)) {
 
-        const float  max_dist = 20.0;
+        const float  max_dist = 40.0;
         const vec3_t ray_vec  = m_sensor_xyz_lut.directions.col(i);
 
         if (ray_vec(2) > 0.0) {
