@@ -31,8 +31,11 @@ nearby_clearing:
   distance: 1.0
 
 visualization:
-  occupancy_min_z: -1.79769e+308
-  occupancy_max_z: 1.79769e+308
+
+  occupancy:
+    cube_size_factor: 0.7
+    min_z: -1.79769e+308
+    max_z: 1.79769e+308
 
   colored_map:
     enabled: false

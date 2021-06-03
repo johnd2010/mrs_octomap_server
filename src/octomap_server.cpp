@@ -123,6 +123,7 @@ protected:
   std::unique_ptr<message_filters::Subscriber<sensor_msgs::LaserScan>>   m_laserScanSub;
 
   static std_msgs::ColorRGBA heightMapColor(double h);
+  double                     _occupancy_cube_size_factor_;
 
   ros::Publisher m_occupiedPointCloudPub;
   ros::Publisher m_freePointCloudPub;
@@ -336,28 +337,30 @@ void OctomapServer::onInit() {
   pl.loadParam("nearby_clearing/enable", m_clearNearby, false);
   pl.loadParam("nearby_clearing/distance", m_nearbyClearingDistance, 0.3);
 
-  pl.loadParam("visualization/occupancy_min_z", m_occupancyMinZ, std::numeric_limits<double>::lowest());
-  pl.loadParam("visualization/occupancy_max_z", m_occupancyMaxZ, std::numeric_limits<double>::max());
+  pl.loadParam("visualization/occupancy/min_z", m_occupancyMinZ);
+  pl.loadParam("visualization/occupancy/max_z", m_occupancyMaxZ);
+  pl.loadParam("visualization/occupancy/cube_size_factor", _occupancy_cube_size_factor_);
 
   pl.loadParam("visualization/colored_map/enabled", m_useColoredMap, false);
 
   pl.loadParam("visualization/height_map/enabled", m_useHeightMap, true);
   pl.loadParam("visualization/height_map/color_factor", m_colorFactor, 0.8);
+
   double r, g, b, a;
-  pl.loadParam("visualization/height_map/color/r", r, 0.0);
-  pl.loadParam("visualization/height_map/color/g", g, 0.0);
-  pl.loadParam("visualization/height_map/color/b", b, 1.0);
-  pl.loadParam("visualization/height_map/color/a", a, 1.0);
+  pl.loadParam("visualization/height_map/color/r", r);
+  pl.loadParam("visualization/height_map/color/g", g);
+  pl.loadParam("visualization/height_map/color/b", b);
+  pl.loadParam("visualization/height_map/color/a", a);
   m_color.r = r;
   m_color.g = g;
   m_color.b = b;
   m_color.a = a;
 
   pl.loadParam("visualization/publish_free_space", m_publishFreeSpace, false);
-  pl.loadParam("visualization/color_free/r", r, 0.0);
-  pl.loadParam("visualization/color_free/g", g, 1.0);
-  pl.loadParam("visualization/color_free/b", b, 0.0);
-  pl.loadParam("visualization/color_free/a", a, 1.0);
+  pl.loadParam("visualization/color_free/r", r);
+  pl.loadParam("visualization/color_free/g", g);
+  pl.loadParam("visualization/color_free/b", b);
+  pl.loadParam("visualization/color_free/a", a);
   m_colorFree.r = r;
   m_colorFree.g = g;
   m_colorFree.b = b;
@@ -1105,6 +1108,7 @@ void OctomapServer::publishAll(const ros::Time& rostime) {
 
     // call general hook:
     handleNode(it);
+
     if (inUpdateBBX) {
       handleNodeInBBX(it);
     }
@@ -1135,6 +1139,7 @@ void OctomapServer::publishAll(const ros::Time& rostime) {
 
         // create marker:
         if (publishMarkerArray) {
+
           unsigned idx = it.getDepth();
           assert(idx < occupiedNodesVis.markers.size());
 
@@ -1144,6 +1149,7 @@ void OctomapServer::publishAll(const ros::Time& rostime) {
           cubeCenter.z = z;
 
           occupiedNodesVis.markers[idx].points.push_back(cubeCenter);
+
           if (m_useHeightMap) {
             double minX, minY, minZ, maxX, maxY, maxZ;
             m_octree->getMetricMin(minX, minY, minZ);
@@ -1169,6 +1175,7 @@ void OctomapServer::publishAll(const ros::Time& rostime) {
 
         // insert into pointcloud:
         if (publishPointCloud) {
+
 #ifdef COLOR_OCTOMAP_SERVER
           PCLPoint _point = PCLPoint();
           _point.x        = x;
@@ -1199,6 +1206,7 @@ void OctomapServer::publishAll(const ros::Time& rostime) {
 
           // create marker for free space:
           if (publishFreeMarkerArray) {
+
             unsigned idx = it.getDepth();
             assert(idx < freeNodesVis.markers.size());
 
@@ -1226,7 +1234,9 @@ void OctomapServer::publishAll(const ros::Time& rostime) {
 
   // finish MarkerArray:
   if (publishMarkerArray) {
+
     for (size_t i = 0; i < occupiedNodesVis.markers.size(); ++i) {
+
       double size = m_octree->getNodeSize(i);
 
       occupiedNodesVis.markers[i].header.frame_id = m_worldFrameId;
@@ -1234,9 +1244,10 @@ void OctomapServer::publishAll(const ros::Time& rostime) {
       occupiedNodesVis.markers[i].ns              = "map";
       occupiedNodesVis.markers[i].id              = i;
       occupiedNodesVis.markers[i].type            = visualization_msgs::Marker::CUBE_LIST;
-      occupiedNodesVis.markers[i].scale.x         = size;
-      occupiedNodesVis.markers[i].scale.y         = size;
-      occupiedNodesVis.markers[i].scale.z         = size;
+      occupiedNodesVis.markers[i].scale.x         = size * _occupancy_cube_size_factor_;
+      occupiedNodesVis.markers[i].scale.y         = size * _occupancy_cube_size_factor_;
+      occupiedNodesVis.markers[i].scale.z         = size * _occupancy_cube_size_factor_;
+
       if (!m_useColoredMap)
         occupiedNodesVis.markers[i].color = m_color;
 
@@ -1259,9 +1270,9 @@ void OctomapServer::publishAll(const ros::Time& rostime) {
       freeNodesVis.markers[i].ns              = "map";
       freeNodesVis.markers[i].id              = i;
       freeNodesVis.markers[i].type            = visualization_msgs::Marker::CUBE_LIST;
-      freeNodesVis.markers[i].scale.x         = size;
-      freeNodesVis.markers[i].scale.y         = size;
-      freeNodesVis.markers[i].scale.z         = size;
+      freeNodesVis.markers[i].scale.x         = size * _occupancy_cube_size_factor_;
+      freeNodesVis.markers[i].scale.y         = size * _occupancy_cube_size_factor_;
+      freeNodesVis.markers[i].scale.z         = size * _occupancy_cube_size_factor_;
       freeNodesVis.markers[i].color           = m_colorFree;
 
       if (freeNodesVis.markers[i].points.size() > 0)
@@ -1311,7 +1322,7 @@ std_msgs::ColorRGBA OctomapServer::heightMapColor(double h) {
 
   std_msgs::ColorRGBA color;
 
-  color.a = 1.0;
+  color.a = 0.7;
   // blend over HSV-values (more colors)
 
   double s = 1.0;
@@ -1751,6 +1762,7 @@ bool OctomapServer::clearInsideBBX(const octomap::point3d& p_min, const octomap:
 }
 
 //}
+
 }  // namespace mrs_octomap_server
 
 #include <pluginlib/class_list_macros.h>
