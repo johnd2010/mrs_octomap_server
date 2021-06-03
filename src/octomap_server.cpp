@@ -604,7 +604,6 @@ void OctomapServer::insertData(const geometry_msgs::Vector3& sensorOriginTf, con
 
 void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr& scan) {
 
-  /* ROS_WARN("[%s]: ---------------------------------------------------- ", ros::this_node::getName().c_str()); */
   /* mrs_lib::ScopeTimer scope_timer("insertLaserScanCallback"); */
 
   if (!m_isInitialized) {
@@ -698,8 +697,6 @@ void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr
 
 void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud) {
 
-  ROS_WARN("[%s]: ---------------------------------------------------- ", ros::this_node::getName().c_str());
-
   /* mrs_lib::ScopeTimer scope_timer("insertCloudCallback"); */
 
   if (!m_isInitialized) {
@@ -717,12 +714,13 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
 
   try {
 
-    if (!this->m_buffer.canTransform(m_worldFrameId, cloud->header.frame_id, cloud->header.stamp)) {
-      ROS_ERROR("[OctomapServer]: cannot find transform from %s to %s", cloud->header.frame_id.c_str(), m_worldFrameId.c_str());
-      return;
+    ros::Time time = cloud->header.stamp;
+
+    if (!this->m_buffer.canTransform(m_worldFrameId, cloud->header.frame_id, time)) {
+      time = ros::Time(0);
     }
 
-    sensorToWorldTf = this->m_buffer.lookupTransform(m_worldFrameId, cloud->header.frame_id, cloud->header.stamp);
+    sensorToWorldTf = this->m_buffer.lookupTransform(m_worldFrameId, cloud->header.frame_id, time);
     pcl_ros::transformAsMatrix(sensorToWorldTf.transform, sensorToWorld);
   }
   catch (tf2::TransformException& ex) {
@@ -755,7 +753,7 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
           pt.x = ray_vec(0) * max_dist;
           pt.y = ray_vec(1) * max_dist;
           pt.z = ray_vec(2) * max_dist;
-          
+
           free_vectors_pc->push_back(pt);
         }
       }
