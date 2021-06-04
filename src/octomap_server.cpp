@@ -173,7 +173,8 @@ protected:
   bool   m_clearNearby;
   double m_nearbyClearingDistance;
 
-  bool m_updateFreeSpaceUsingMissingData;
+  bool   _unknown_rays_update_free_space_;
+  double _unknown_rays_distance_;
 
   // downprojected 2D map:
   bool                    m_incrementalUpdate;
@@ -315,7 +316,9 @@ void OctomapServer::onInit() {
   pl.loadParam("resolution", m_res, 0.05);
   pl.loadParam("frame_id", m_worldFrameId);
   pl.loadParam("compress_map", m_compressMap, true);
-  pl.loadParam("update_free_space_using_missing_data", m_updateFreeSpaceUsingMissingData);
+
+  pl.loadParam("unknown_rays/update_free_space", _unknown_rays_update_free_space_);
+  pl.loadParam("unknown_rays/ray_distance", _unknown_rays_distance_);
 
   pl.loadParam("sensor_params/enabled", m_sensor_params_enabled);
   pl.loadParam("sensor_params/vertical_fov_angle", m_sensor_vfov);
@@ -393,13 +396,6 @@ void OctomapServer::onInit() {
                       "please define COLOR_OCTOMAP_SERVER and recompile or launch " + "the octomap_color_server node";
     ROS_WARN("[%s]: %s", ros::this_node::getName().c_str(), msg.c_str());
 #endif
-  }
-
-  if (m_updateFreeSpaceUsingMissingData && m_maxRange < 0.0) {
-    std::string msg = std::string("You enabled updating free space using missing data in measurements. ") +
-                      "However, the maximal sensor range is not limited. " + "Disabling this feature.";
-    ROS_WARN("[%s]: %s", ros::this_node::getName().c_str(), msg.c_str());
-    m_updateFreeSpaceUsingMissingData = false;
   }
 
   if (m_localMapping && m_localMapDistance < m_maxRange) {
@@ -644,7 +640,7 @@ void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr
   pc->header.frame_id = m_worldFrameId;
 
   // compute free rays, if required
-  if (m_updateFreeSpaceUsingMissingData) {
+  if (_unknown_rays_update_free_space_) {
 
     sensor_msgs::LaserScan free_scan = *scan;
     for (auto& range : free_scan.ranges) {
@@ -732,7 +728,7 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
   }
 
   // compute free rays, if required
-  if (m_updateFreeSpaceUsingMissingData) {
+  if (_unknown_rays_update_free_space_) {
 
     /* Eigen::Affine3d s2w = tf2::transformToEigen(sensorToWorldTf); */
 
@@ -749,13 +745,12 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
 
       if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z)) {
 
-        const float  max_dist = 40.0;
-        const vec3_t ray_vec  = m_sensor_xyz_lut.directions.col(i);
+        const vec3_t ray_vec = m_sensor_xyz_lut.directions.col(i);
 
         if (ray_vec(2) > 0.0) {
-          pt.x = ray_vec(0) * max_dist;
-          pt.y = ray_vec(1) * max_dist;
-          pt.z = ray_vec(2) * max_dist;
+          pt.x = ray_vec(0) * float(_unknown_rays_distance_);
+          pt.y = ray_vec(1) * float(_unknown_rays_distance_);
+          pt.z = ray_vec(2) * float(_unknown_rays_distance_);
 
           free_vectors_pc->push_back(pt);
         }

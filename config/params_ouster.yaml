@@ -1,7 +1,10 @@
 resolution: 1.00
 compress_map: true
 
-update_free_space_using_missing_data: true
+unknown_rays:
+
+  update_free_space: true
+  ray_distance: 20.0
 
 # for point cloud raycasting
 sensor_params:
