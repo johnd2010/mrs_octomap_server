@@ -36,7 +36,7 @@ nearby_clearing:
 visualization:
 
   occupancy:
-    cube_size_factor: 0.7
+    cube_size_factor: 1.0
     min_z: -1.79769e+308
     max_z: 1.79769e+308
 
