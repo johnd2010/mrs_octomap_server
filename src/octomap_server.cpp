@@ -1317,7 +1317,7 @@ std_msgs::ColorRGBA OctomapServer::heightMapColor(double h) {
 
   std_msgs::ColorRGBA color;
 
-  color.a = 0.7;
+  color.a = 1.0;
   // blend over HSV-values (more colors)
 
   double s = 1.0;
