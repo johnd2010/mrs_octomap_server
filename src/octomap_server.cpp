@@ -277,11 +277,11 @@ protected:
 
   void initializeLidarLUTSimulation(const size_t w, const size_t h);
 
-  xyz_lut_t m_sensor_xyz_lut;
-  bool      m_sensor_params_enabled;
-  float     m_sensor_vfov;
-  int       m_sensor_vrays;
-  int       m_sensor_hrays;
+  xyz_lut_t m_sensor_3d_xyz_lut;
+  bool      m_sensor_3d_params_enabled;
+  float     m_sensor_3d_vfov;
+  int       m_sensor_3d_vrays;
+  int       m_sensor_3d_hrays;
 
   /**
    * Adjust data of map due to a change in its info properties (origin or size,
@@ -320,10 +320,10 @@ void OctomapServer::onInit() {
   pl.loadParam("unknown_rays/update_free_space", _unknown_rays_update_free_space_);
   pl.loadParam("unknown_rays/ray_distance", _unknown_rays_distance_);
 
-  pl.loadParam("sensor_params/enabled", m_sensor_params_enabled);
-  pl.loadParam("sensor_params/vertical_fov_angle", m_sensor_vfov);
-  pl.loadParam("sensor_params/vertical_rays", m_sensor_vrays);
-  pl.loadParam("sensor_params/horizontal_rays", m_sensor_hrays);
+  pl.loadParam("sensor_params_3d/enabled", m_sensor_3d_params_enabled);
+  pl.loadParam("sensor_params_3d/vertical_fov_angle", m_sensor_3d_vfov);
+  pl.loadParam("sensor_params_3d/vertical_rays", m_sensor_3d_vrays);
+  pl.loadParam("sensor_params_3d/horizontal_rays", m_sensor_3d_hrays);
 
   double probHit, probMiss, thresMin, thresMax;
   pl.loadParam("sensor_model/hit", probHit);
@@ -410,17 +410,17 @@ void OctomapServer::onInit() {
 
   /* initialize sensor LUT model //{ */
 
-  if (m_sensor_params_enabled) {
+  if (m_sensor_3d_params_enabled) {
 
     if (_simulation_) {
 
-      initializeLidarLUTSimulation(m_sensor_hrays, m_sensor_vrays);
+      initializeLidarLUTSimulation(m_sensor_3d_hrays, m_sensor_3d_vrays);
 
       ROS_INFO("[OctomapServer]: Ouster LUT model initialized (simulation)");
 
     } else {
 
-      initializeOusterLUT(m_sensor_hrays, m_sensor_vrays, ouster::sensor::gen1_azimuth_angles, ouster::sensor::gen1_altitude_angles);
+      initializeOusterLUT(m_sensor_3d_hrays, m_sensor_3d_vrays, ouster::sensor::gen1_azimuth_angles, ouster::sensor::gen1_altitude_angles);
 
       ROS_INFO("[OctomapServer]: Ouster LUT model initialized (real hw)");
     }
@@ -771,7 +771,7 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
 
       if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z)) {
 
-        const vec3_t ray_vec = m_sensor_xyz_lut.directions.col(i);
+        const vec3_t ray_vec = m_sensor_3d_xyz_lut.directions.col(i);
 
         if (ray_vec(2) > 0.0) {
           pt.x = ray_vec(0) * float(_unknown_rays_distance_);
@@ -959,10 +959,10 @@ void OctomapServer::initializeOusterLUT(const size_t w, const size_t h, const st
                      << xyz_lut.direction.cols() << " is not equal to the number of offset vectors " << xyz_lut.offset.cols() << ")!");
   }
 
-  m_sensor_xyz_lut = {xyz_lut.direction.cast<float>().transpose(), xyz_lut.offset.cast<float>().transpose()};
-  m_sensor_xyz_lut.directions.colwise().normalize();
+  m_sensor_3d_xyz_lut = {xyz_lut.direction.cast<float>().transpose(), xyz_lut.offset.cast<float>().transpose()};
+  m_sensor_3d_xyz_lut.directions.colwise().normalize();
 
-  ROS_INFO_STREAM("[TODO]: Initialized XYZ LUT table with " << m_sensor_xyz_lut.directions.cols() << " elements.");
+  ROS_INFO_STREAM("[TODO]: Initialized XYZ LUT table with " << m_sensor_3d_xyz_lut.directions.cols() << " elements.");
 }
 
 //}
@@ -978,8 +978,8 @@ void OctomapServer::initializeLidarLUTSimulation(const size_t w, const size_t h)
   const double                                    minAngle = 0.0;
   const double                                    maxAngle = 2.0 * M_PI;
 
-  const double verticalMinAngle = -m_sensor_vfov / 2.0;
-  const double verticalMaxAngle = m_sensor_vfov / 2.0;
+  const double verticalMinAngle = -m_sensor_3d_vfov / 2.0;
+  const double verticalMaxAngle = m_sensor_3d_vfov / 2.0;
 
   const double yDiff = maxAngle - minAngle;
   const double pDiff = verticalMaxAngle - verticalMinAngle;
@@ -1009,14 +1009,14 @@ void OctomapServer::initializeLidarLUTSimulation(const size_t w, const size_t h)
   }
 
   int it = 0;
-  m_sensor_xyz_lut.directions.resize(3, rangeCount * verticalRangeCount);
-  m_sensor_xyz_lut.offsets.resize(3, rangeCount * verticalRangeCount);
+  m_sensor_3d_xyz_lut.directions.resize(3, rangeCount * verticalRangeCount);
+  m_sensor_3d_xyz_lut.offsets.resize(3, rangeCount * verticalRangeCount);
 
   for (int row = 0; row < verticalRangeCount; row++) {
     for (int col = 0; col < rangeCount; col++) {
       const auto [x_coeff, y_coeff, z_coeff] = coord_coeffs.at(col * verticalRangeCount + row);
-      m_sensor_xyz_lut.directions.col(it)    = vec3_t(x_coeff, y_coeff, z_coeff);
-      m_sensor_xyz_lut.offsets.col(it)       = vec3_t(0, 0, 0);
+      m_sensor_3d_xyz_lut.directions.col(it) = vec3_t(x_coeff, y_coeff, z_coeff);
+      m_sensor_3d_xyz_lut.offsets.col(it)    = vec3_t(0, 0, 0);
       it++;
     }
   }

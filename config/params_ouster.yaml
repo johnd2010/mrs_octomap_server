@@ -7,7 +7,7 @@ unknown_rays:
   ray_distance: 20.0
 
 # for point cloud raycasting
-sensor_params:
+sensor_params_3d:
 
   enabled: true
   vertical_fov_angle: deg(45)

@@ -25,12 +25,13 @@
       <rosparam file="$(find mrs_octomap_server)/config/params_ouster.yaml" />
 
       <param name="uav_name" type="string" value="$(arg UAV_NAME)" />
-      <param name="frame_id" type="string" value="$(arg UAV_NAME)/gps_origin" />
+      <param name="frame_id" type="string" value="$(arg UAV_NAME)/stable_origin" />
       <param name="simulation" type="bool" value="$(arg simulation)" />
 
-        <!-- topics -->
-      <!-- <remap from="~point_cloud_in" to="os_cloud_nodelet/points" /> -->
+      <!-- topics -->
+      <!-- 3D lidar -->
       <remap from="~point_cloud_in" to="os_cloud_nodelet/points_processed" />
+      <!-- 2D lidar -->
       <remap from="~laser_scan_in" to="rplidar/scan" />
 
       <remap from="~octomap_binary_out" to="octomap_server/octomap_binary" />
