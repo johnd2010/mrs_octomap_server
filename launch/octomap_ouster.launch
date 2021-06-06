@@ -31,6 +31,8 @@
         <!-- topics -->
       <!-- <remap from="~point_cloud_in" to="os_cloud_nodelet/points" /> -->
       <remap from="~point_cloud_in" to="os_cloud_nodelet/points_processed" />
+      <remap from="~laser_scan_in" to="rplidar/scan" />
+
       <remap from="~octomap_binary_out" to="octomap_server/octomap_binary" />
       <remap from="~octomap_full_out" to="octomap_server/octomap_full" />
       <remap from="~occupied_cells_via_array_out" to="octomap_server/occupied_cells_via_array" />

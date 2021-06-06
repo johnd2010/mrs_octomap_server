@@ -548,6 +548,8 @@ void OctomapServer::insertData(const geometry_msgs::Vector3& sensorOriginTf, con
 
   for (PCLPointCloud::const_iterator it = free_vectors_cloud->begin(); it != free_vectors_cloud->end(); ++it) {
 
+    ROS_INFO_THROTTLE(1.0, "[OctomapServer]: slon slona");
+
     if (!(std::isfinite(it->x) && std::isfinite(it->y) && std::isfinite(it->z))) {
       continue;
     }
@@ -618,10 +620,11 @@ void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr
   try {
 
     if (!this->m_buffer.canTransform(m_worldFrameId, scan->header.frame_id, scan->header.stamp)) {
-      /* throw "Failed"; */
+      sensorToWorldTf = this->m_buffer.lookupTransform(m_worldFrameId, scan->header.frame_id, ros::Time(0));
+    } else {
+      sensorToWorldTf = this->m_buffer.lookupTransform(m_worldFrameId, scan->header.frame_id, scan->header.stamp);
     }
 
-    sensorToWorldTf = this->m_buffer.lookupTransform(m_worldFrameId, scan->header.frame_id, scan->header.stamp);
     pcl_ros::transformAsMatrix(sensorToWorldTf.transform, sensorToWorld);
   }
   catch (tf2::TransformException& ex) {
@@ -631,32 +634,40 @@ void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr
 
   /* scope_timer.checkpoint("transform"); */
 
+  // laser scan to point cloud
   sensor_msgs::PointCloud2 ros_cloud;
   projector_.projectLaser(*scan, ros_cloud);
   pcl::fromROSMsg(ros_cloud, *pc);
-
-  // directly transform to map frame:
-  pcl::transformPointCloud(*pc, *pc, sensorToWorld);
-  pc->header.frame_id = m_worldFrameId;
 
   // compute free rays, if required
   if (_unknown_rays_update_free_space_) {
 
     sensor_msgs::LaserScan free_scan = *scan;
-    for (auto& range : free_scan.ranges) {
-      if (std::isfinite(range)) {
-        range = std::numeric_limits<double>::infinity();
+
+    double free_scan_distance = (scan->range_max - 1.0) < _unknown_rays_distance_ ? (scan->range_max - 1.0) : _unknown_rays_distance_;
+
+    for (int i = 0; i < scan->ranges.size(); i++) {
+      if (scan->ranges[i] > scan->range_max || scan->ranges[i] < scan->range_min) {
+        free_scan.ranges[i] = scan->range_max - 1.0;  // valid under max range
       } else {
-        range = 1;
+        free_scan.ranges[i] = scan->range_min - 1.0;  // definitely invalid
       }
     }
 
-    projector_.projectLaser(free_scan, ros_cloud);
-    pcl::fromROSMsg(ros_cloud, *free_vectors_pc);
+    sensor_msgs::PointCloud2 free_cloud;
+    projector_.projectLaser(free_scan, free_cloud);
 
-    pcl::transformPointCloud(*free_vectors_pc, *free_vectors_pc, sensorToWorld);
+    pcl::fromROSMsg(free_cloud, *free_vectors_pc);
   }
 
+  free_vectors_pc->header = pc->header;
+
+  // transform to the map frame
+
+  pcl::transformPointCloud(*pc, *pc, sensorToWorld);
+  pcl::transformPointCloud(*free_vectors_pc, *free_vectors_pc, sensorToWorld);
+
+  pc->header.frame_id              = m_worldFrameId;
   free_vectors_pc->header.frame_id = m_worldFrameId;
 
   /* scope_timer.checkpoint("insertData"); */
