@@ -548,8 +548,6 @@ void OctomapServer::insertData(const geometry_msgs::Vector3& sensorOriginTf, con
 
   for (PCLPointCloud::const_iterator it = free_vectors_cloud->begin(); it != free_vectors_cloud->end(); ++it) {
 
-    ROS_INFO_THROTTLE(1.0, "[OctomapServer]: slon slona");
-
     if (!(std::isfinite(it->x) && std::isfinite(it->y) && std::isfinite(it->z))) {
       continue;
     }
@@ -560,16 +558,33 @@ void OctomapServer::insertData(const geometry_msgs::Vector3& sensorOriginTf, con
     // check if the ray intersects a cell in the occupied list
     if (m_octree->computeRayKeys(sensorOrigin, measured_point, keyRay)) {
 
-      bool ray_is_cool = true;
+      bool                      ray_is_cool         = true;
+      octomap::KeyRay::iterator alterantive_ray_end = keyRay.end();
+
       for (octomap::KeyRay::iterator it2 = keyRay.begin(), end = keyRay.end(); it2 != end; ++it2) {
+
+        // check if the cell was spotted as occupied by a valid ray
         if (occupied_cells.find(*it2) != occupied_cells.end()) {
           ray_is_cool = false;
+          break;
+        }
+
+        // check if the cell is occupied in a map
+        auto node = m_octree->search(*it2);
+        if (node && m_octree->isNodeOccupied(node)) {
+
+          if (it2 == keyRay.begin()) {
+            alterantive_ray_end = keyRay.begin();  // special case
+          } else {
+            alterantive_ray_end = it2 - 1;
+          }
+
           break;
         }
       }
 
       if (ray_is_cool) {
-        free_cells.insert(keyRay.begin(), keyRay.end());
+        free_cells.insert(keyRay.begin(), alterantive_ray_end);
       }
     }
   }
