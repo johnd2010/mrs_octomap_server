@@ -7,6 +7,9 @@
   <arg name="standalone" default="false" />
   <arg name="custom_config" default="" />
 
+  <arg name="3d_lidar_topic" default="" />
+  <arg name="2d_lidar_topic" default="" />
+
   <arg     if="$(arg debug)" name="launch_prefix" value="debug_roslaunch" />
   <arg unless="$(arg debug)" name="launch_prefix" value="" />
 
@@ -30,9 +33,9 @@
 
       <!-- topics -->
       <!-- 3D lidar -->
-      <remap from="~point_cloud_in" to="os_cloud_nodelet/points_processed" />
+      <remap from="~point_cloud_in" to="$(arg 3d_lidar_topic)" />
       <!-- 2D lidar -->
-      <remap from="~laser_scan_in" to="rplidar/scan" />
+      <remap from="~laser_scan_in" to="$(arg 2d_lidar_topic)" />
 
       <remap from="~octomap_binary_out" to="octomap_server/octomap_binary" />
       <remap from="~octomap_full_out" to="octomap_server/octomap_full" />
