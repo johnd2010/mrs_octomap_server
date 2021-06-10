@@ -495,7 +495,7 @@ void OctomapServer::onInit() {
 void OctomapServer::insertData(const geometry_msgs::Vector3& sensorOriginTf, const PCLPointCloud::ConstPtr& cloud,
                                const PCLPointCloud::ConstPtr& free_vectors_cloud) {
 
-  mrs_lib::ScopeTimer scope_timer("insertData");
+  /* mrs_lib::ScopeTimer scope_timer("insertData"); */
 
   const octomap::point3d sensorOrigin = octomap::pointTfToOctomap(sensorOriginTf);
 
@@ -509,7 +509,7 @@ void OctomapServer::insertData(const geometry_msgs::Vector3& sensorOriginTf, con
   octomap::KeySet free_cells, occupied_cells;
   const bool      free_space_bounded = free_space_ray_len > 0.0f;
 
-  scope_timer.checkpoint("sortingThroughPoints");
+  /* scope_timer.checkpoint("sortingThroughPoints"); */
 
   // all points: free on ray, occupied on endpoint:
   for (PCLPointCloud::const_iterator it = cloud->begin(); it != cloud->end(); ++it) {
@@ -583,7 +583,7 @@ void OctomapServer::insertData(const geometry_msgs::Vector3& sensorOriginTf, con
     }
   }
 
-  scope_timer.checkpoint("markingFree");
+  /* scope_timer.checkpoint("markingFree"); */
 
   // mark free cells only if not seen occupied in this cloud
   for (octomap::KeySet::iterator it = free_cells.begin(), end = free_cells.end(); it != end; ++it) {
@@ -592,14 +592,14 @@ void OctomapServer::insertData(const geometry_msgs::Vector3& sensorOriginTf, con
     }
   }
 
-  scope_timer.checkpoint("markingOcuppied");
+  /* scope_timer.checkpoint("markingOcuppied"); */
 
   // now mark all occupied cells:
   for (octomap::KeySet::iterator it = occupied_cells.begin(), end = occupied_cells.end(); it != end; it++) {
     m_octree->updateNode(*it, true);
   }
 
-  scope_timer.checkpoint("compresssing");
+  /* scope_timer.checkpoint("compresssing"); */
 
   if (m_compressMap) {
     m_octree->prune();
