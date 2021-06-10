@@ -29,7 +29,7 @@
       <rosparam file="$(find mrs_octomap_server)/config/params_ouster.yaml" />
 
       <param name="uav_name" type="string" value="$(arg UAV_NAME)" />
-      <param name="frame_id" type="string" value="$(arg UAV_NAME)/stable_origin" />
+      <param name="frame_id" type="string" value="$(arg UAV_NAME)/slam_mapping_origin" />
       <param name="simulation" type="bool" value="$(arg simulation)" />
 
       <!-- topics -->
