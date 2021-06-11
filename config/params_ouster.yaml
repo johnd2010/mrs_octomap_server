@@ -35,6 +35,9 @@ nearby_clearing:
 
 visualization:
 
+  free_throttled: 1.0 # [Hz]
+  occupied_throttled: 1.0 # [Hz]
+
   occupancy:
     cube_size_factor: 1.0
     min_z: -1.79769e+308

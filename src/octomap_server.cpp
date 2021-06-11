@@ -133,6 +133,14 @@ protected:
   ros::Publisher m_fullMapPub;
   ros::Publisher m_mapPub;
 
+  // throttled
+  ros::Publisher m_fmarkerThrPub;
+  ros::Publisher m_markerThrPub;
+  ros::Time      time_last_occupied_published_;
+  ros::Time      time_last_free_published_;
+  double         throttle_occupied_vis_ = 1;
+  double         throttle_free_vis_     = 1;
+
   ros::ServiceServer m_octomapBinaryService;
   ros::ServiceServer m_octomapFullService;
   ros::ServiceServer m_clearBBXService;
@@ -342,6 +350,9 @@ void OctomapServer::onInit() {
   pl.loadParam("nearby_clearing/enable", m_clearNearby, false);
   pl.loadParam("nearby_clearing/distance", m_nearbyClearingDistance, 0.3);
 
+  pl.loadParam("visualization/occupied_throttled", throttle_occupied_vis_);
+  pl.loadParam("visualization/free_throttled", throttle_free_vis_);
+
   pl.loadParam("visualization/occupancy/min_z", m_occupancyMinZ);
   pl.loadParam("visualization/occupancy/max_z", m_occupancyMaxZ);
   pl.loadParam("visualization/occupancy/cube_size_factor", _occupancy_cube_size_factor_);
@@ -459,6 +470,13 @@ void OctomapServer::onInit() {
   this->m_freePointCloudPub     = nh_.advertise<sensor_msgs::PointCloud2>("octomap_free_centers_out", 1);
   this->m_mapPub                = nh_.advertise<nav_msgs::OccupancyGrid>("projected_map_out", 1);
   this->m_fmarkerPub            = nh_.advertise<visualization_msgs::MarkerArray>("free_cells_vis_array_out", 1);
+
+  // throttled
+  this->m_markerThrPub  = nh_.advertise<visualization_msgs::MarkerArray>("occupied_cells_vis_array_throttled_out", 1);
+  this->m_fmarkerThrPub = nh_.advertise<visualization_msgs::MarkerArray>("free_cells_vis_array_throttled_out", 1);
+
+  time_last_occupied_published_ = ros::Time(0);
+  time_last_free_published_     = ros::Time(0);
 
   //}
 
@@ -1102,8 +1120,8 @@ void OctomapServer::publishAll(const ros::Time& rostime) {
     return;
   }
 
-  bool publishFreeMarkerArray = m_publishFreeSpace && m_fmarkerPub.getNumSubscribers() > 0;
-  bool publishMarkerArray     = m_markerPub.getNumSubscribers() > 0;
+  bool publishFreeMarkerArray = m_publishFreeSpace && (m_fmarkerPub.getNumSubscribers() > 0 || m_fmarkerThrPub.getNumSubscribers() > 0);
+  bool publishMarkerArray     = (m_markerPub.getNumSubscribers() > 0 || m_markerThrPub.getNumSubscribers());
   bool publishPointCloud      = m_occupiedPointCloudPub.getNumSubscribers() > 0 || m_freePointCloudPub.getNumSubscribers() > 0;
   bool publishBinaryMap       = m_binaryMapPub.getNumSubscribers() > 0;
   bool publishFullMap         = m_fullMapPub.getNumSubscribers() > 0;
@@ -1289,11 +1307,24 @@ void OctomapServer::publishAll(const ros::Time& rostime) {
       else
         occupiedNodesVis.markers[i].action = visualization_msgs::Marker::DELETE;
     }
+
     m_markerPub.publish(occupiedNodesVis);
+
+    // publisher throttled
+    {
+      const double last_pub_time = (ros::Time::now() - time_last_occupied_published_).toSec();
+      const double max_time      = 1.0 / throttle_occupied_vis_;
+
+      if (last_pub_time >= max_time) {
+        m_markerThrPub.publish(occupiedNodesVis);
+        time_last_occupied_published_ = ros::Time::now();
+      }
+    }
   }
 
   // finish FreeMarkerArray:
   if (publishFreeMarkerArray) {
+
     for (size_t i = 0; i < freeNodesVis.markers.size(); ++i) {
       double size = m_octree->getNodeSize(i);
 
@@ -1312,9 +1343,20 @@ void OctomapServer::publishAll(const ros::Time& rostime) {
       else
         freeNodesVis.markers[i].action = visualization_msgs::Marker::DELETE;
     }
-    m_fmarkerPub.publish(freeNodesVis);
-  }
 
+    m_fmarkerPub.publish(freeNodesVis);
+
+    // publisher throttled
+    {
+      const double last_pub_time = (ros::Time::now() - time_last_free_published_).toSec();
+      const double max_time      = 1.0 / throttle_free_vis_;
+
+      if (last_pub_time >= max_time) {
+        m_fmarkerThrPub.publish(freeNodesVis);
+        time_last_free_published_ = ros::Time::now();
+      }
+    }
+  }
 
   // finish pointcloud:
   if (publishPointCloud) {

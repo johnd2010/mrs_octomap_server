@@ -42,19 +42,21 @@
       <!-- 2D lidar -->
       <remap from="~laser_scan_in" to="$(arg 2d_lidar_topic)" />
 
-      <remap from="~octomap_binary_out" to="octomap_server/octomap_binary" />
-      <remap from="~octomap_full_out" to="octomap_server/octomap_full" />
-      <remap from="~occupied_cells_via_array_out" to="octomap_server/occupied_cells_via_array" />
-      <remap from="~free_cells_via_array_out" to="octomap_server/free_cells_via_array" />
-      <remap from="~octomap_point_cloud_centers_out" to="octomap_server/octomap_point_cloud_centers" />
-      <remap from="~octomap_free_centers_out" to="octomap_server/octomap_free_centers" />
-      <remap from="~projected_map_out" to="octomap_server/projected_map" />
+      <remap from="~octomap_binary_out" to="~octomap_binary" />
+      <remap from="~octomap_full_out" to="~octomap_full" />
+      <remap from="~occupied_cells_vis_array_out" to="~occupied_cells_vis_array" />
+      <remap from="~occupied_cells_vis_array_throttled_out" to="~occupied_cells_vis_array_throttled" />
+      <remap from="~free_cells_vis_array_out" to="~free_cells_vis_array" />
+      <remap from="~free_cells_vis_array_throttled_out" to="~free_cells_vis_array_throttled" />
+      <remap from="~octomap_point_cloud_centers_out" to="~octomap_point_cloud_centers" />
+      <remap from="~octomap_free_centers_out" to="~octomap_free_centers" />
+      <remap from="~projected_map_out" to="~projected_map" />
 
         <!-- services -->
-      <remap from="~octomap_binary" to="octomap_server/octomap_binary" />
-      <remap from="~octomap_full" to="octomap_server/octomap_full" />
-      <remap from="~clear_bbx" to="octomap_server/clear_bbx" />
-      <remap from="~reset" to="octomap_server/reset" />
+      <remap from="~octomap_binary" to="~octomap_binary" />
+      <remap from="~octomap_full" to="~octomap_full" />
+      <remap from="~clear_bbx" to="~clear_bbx" />
+      <remap from="~reset" to="~reset" />
 
     </node>
 
