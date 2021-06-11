@@ -143,6 +143,8 @@ protected:
 
   std::shared_ptr<OcTreeT> m_octree;
 
+  double cloud_insertion_time_ = 0;
+
   octomap::KeyRay    m_keyRay;  // temp storage for ray casting
   octomap::OcTreeKey m_updateBBXMin;
   octomap::OcTreeKey m_updateBBXMax;
@@ -722,6 +724,8 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
     return;
   }
 
+  ros::Time time_start = ros::Time::now();
+
   PCLPointCloud::Ptr pc              = boost::make_shared<PCLPointCloud>();
   PCLPointCloud::Ptr free_vectors_pc = boost::make_shared<PCLPointCloud>();
   pcl::fromROSMsg(*cloud, *pc);
@@ -817,6 +821,17 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
   /* scope_timer.checkpoint("publish"); */
 
   publishAll(cloud->header.stamp);
+
+  {
+    ros::Time time_end = ros::Time::now();
+
+    double exec_duration = (time_end - time_start).toSec();
+
+    double coef           = 0.95;
+    cloud_insertion_time_ = coef * cloud_insertion_time_ + (1.0 - coef) * exec_duration;
+
+    ROS_INFO_THROTTLE(5.0, "[OctomapServer]: avg cloud insertion time = %.3f sec", cloud_insertion_time_);
+  }
 }
 
 //}
