@@ -1,8 +1,0 @@
-resolution: 0.20
-
-sensor_params_3d:
-
-  enabled: true
-  vertical_fov_angle: deg(45)
-  vertical_rays: 64
-  horizontal_rays: 64 # default 2048
