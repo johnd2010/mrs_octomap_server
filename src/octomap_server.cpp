@@ -1059,11 +1059,13 @@ bool OctomapServer::openFile(const std::string& filename) {
     return false;
 
   std::string suffix = filename.substr(filename.length() - 3, 3);
+
   if (suffix == ".bt") {
     if (!m_octree->readBinary(filename)) {
       return false;
     }
   } else if (suffix == ".ot") {
+
     auto tree = octomap::AbstractOcTree::read(filename);
     if (!tree) {
       return false;
@@ -1077,6 +1079,7 @@ bool OctomapServer::openFile(const std::string& filename) {
       ROS_INFO("[%s]: %s", ros::this_node::getName().c_str(), msg.c_str());
       return false;
     }
+
   } else {
     return false;
   }
