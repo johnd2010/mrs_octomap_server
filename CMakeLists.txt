@@ -28,6 +28,7 @@ set(PACKAGE_DEPENDENCIES
   mrs_lib
   laser_geometry
   ouster_ros
+  mrs_msgs
   )
 
 find_package(catkin REQUIRED COMPONENTS ${PACKAGE_DEPENDENCIES})
