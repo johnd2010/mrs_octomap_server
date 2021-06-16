@@ -12,7 +12,8 @@
 
   <arg name="map_path" default="$(env HOME)/maps" />
 
-  <arg name="frame_id" default="$(arg UAV_NAME)/gps_origin" />
+  <arg name="world_frame_id" default="$(arg UAV_NAME)/gps_origin" />
+  <arg name="robot_frame_id" default="$(arg UAV_NAME)/fcu" />
 
   <arg     if="$(arg debug)" name="launch_prefix" value="debug_roslaunch" />
   <arg unless="$(arg debug)" name="launch_prefix" value="" />
@@ -36,7 +37,8 @@
       <param name="uav_name" type="string" value="$(arg UAV_NAME)" />
       <param name="simulation" type="bool" value="$(arg simulation)" />
 
-      <param name="frame_id" type="string" value="$(arg frame_id)" />
+      <param name="world_frame_id" type="string" value="$(arg world_frame_id)" />
+      <param name="robot_frame_id" type="string" value="$(arg robot_frame_id)" />
 
       <param name="map_path" type="string" value="$(arg map_path)" />
 
@@ -48,13 +50,13 @@
 
       <remap from="~octomap_binary_out" to="~octomap_binary" />
       <remap from="~octomap_full_out" to="~octomap_full" />
+      <remap from="~octomap_local_out" to="~octomap_local" />
       <remap from="~occupied_cells_vis_array_out" to="~occupied_cells_vis_array" />
       <remap from="~occupied_cells_vis_array_throttled_out" to="~occupied_cells_vis_array_throttled" />
       <remap from="~free_cells_vis_array_out" to="~free_cells_vis_array" />
       <remap from="~free_cells_vis_array_throttled_out" to="~free_cells_vis_array_throttled" />
       <remap from="~octomap_point_cloud_centers_out" to="~octomap_point_cloud_centers" />
       <remap from="~octomap_free_centers_out" to="~octomap_free_centers" />
-      <remap from="~projected_map_out" to="~projected_map" />
 
         <!-- services -->
       <remap from="~octomap_binary" to="~octomap_binary" />

@@ -1,6 +1,9 @@
 resolution: 1.00
 compress_map: true
 
+main_timer:
+  rate: 10 # [Hz]
+
 unknown_rays:
 
   update_free_space: true
@@ -23,11 +26,9 @@ sensor_model:
   min: 0.3  # [0, 1]
   max: 0.7  # [0, 1]
 
-filter_speckles: false
-
 local_mapping:
   enable: false
-  distance: 40.0
+  distance: 30.0
 
 nearby_clearing:
   enable: false
@@ -61,8 +62,3 @@ visualization:
     g: 1.0
     b: 0.0
     a: 1.0
-
-  downprojected_2D_map:
-    incremental_projection: false
-    min_x_size: 30.0
-    min_y_size: 30.0
