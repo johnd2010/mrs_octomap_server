@@ -21,7 +21,6 @@ set(PACKAGE_DEPENDENCIES
   std_msgs
   nav_msgs
   geometry_msgs
-  visualization_msgs
   pcl_conversions
   octomap_ros
   octomap_msgs

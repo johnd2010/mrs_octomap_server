@@ -1,8 +1,29 @@
-resolution: 1.00
-compress_map: true
+resolution: 1.00 # [m]
 
-main_timer:
-  rate: 10 # [Hz]
+global_map:
+
+  # the publisher rate of the full map
+  rate: 1.0 # [Hz]
+
+  # should we prune the map before publishing?
+  compress: true
+
+  publish_full: true # should publish map with full probabilities?
+  publish_binary: false # should publish map with binary occupancy?
+
+local_map:
+
+  # should create a local map from the global map?
+  enabled: true
+
+  # the bounding box distance of the local map
+  distance: 50.0
+
+  # the publisher rate of the local map
+  rate: 10.0 # [Hz]
+
+  publish_full: true # should publish map with full probabilities?
+  publish_binary: false # should publish map with binary occupancy?
 
 unknown_rays:
 
@@ -25,40 +46,3 @@ sensor_model:
   miss: 0.45 # [0, 1]
   min: 0.3  # [0, 1]
   max: 0.7  # [0, 1]
-
-local_mapping:
-  enable: false
-  distance: 30.0
-
-nearby_clearing:
-  enable: false
-  distance: 1.0
-
-visualization:
-
-  free_throttled: 1.0 # [Hz]
-  occupied_throttled: 1.0 # [Hz]
-
-  occupancy:
-    cube_size_factor: 1.0
-    min_z: -1.79769e+308
-    max_z: 1.79769e+308
-
-  colored_map:
-    enabled: false
-
-  height_map:
-    enabled: true
-    color_factor: 0.8
-    color:
-      r: 1.0
-      g: 0.0
-      b: 0.0
-      a: 1.0
-
-  publish_free_space: true
-  color_free:
-    r: 0.0
-    g: 1.0
-    b: 0.0
-    a: 1.0

@@ -42,27 +42,24 @@
 
       <param name="map_path" type="string" value="$(arg map_path)" />
 
-      <!-- topics -->
+      <!-- topics in -->
+
       <!-- 3D lidar -->
       <remap from="~point_cloud_in" to="$(arg 3d_lidar_topic)" />
       <!-- 2D lidar -->
       <remap from="~laser_scan_in" to="$(arg 2d_lidar_topic)" />
 
-      <remap from="~octomap_binary_out" to="~octomap_binary" />
-      <remap from="~octomap_full_out" to="~octomap_full" />
-      <remap from="~octomap_local_out" to="~octomap_local" />
-      <remap from="~occupied_cells_vis_array_out" to="~occupied_cells_vis_array" />
-      <remap from="~occupied_cells_vis_array_throttled_out" to="~occupied_cells_vis_array_throttled" />
-      <remap from="~free_cells_vis_array_out" to="~free_cells_vis_array" />
-      <remap from="~free_cells_vis_array_throttled_out" to="~free_cells_vis_array_throttled" />
-      <remap from="~octomap_point_cloud_centers_out" to="~octomap_point_cloud_centers" />
-      <remap from="~octomap_free_centers_out" to="~octomap_free_centers" />
+      <!-- topics out -->
+
+      <remap from="~octomap_global_full_out" to="~octomap_global_full" />
+      <remap from="~octomap_global_binary_out" to="~octomap_global_binary" />
+
+      <remap from="~octomap_local_full_out" to="~octomap_local_full" />
+      <remap from="~octomap_local_binary_out" to="~octomap_local_binary" />
 
         <!-- services -->
-      <remap from="~octomap_binary" to="~octomap_binary" />
-      <remap from="~octomap_full" to="~octomap_full" />
       <remap from="~clear_bbx" to="~clear_bbx" />
-      <remap from="~reset" to="~reset" />
+      <remap from="~reset_map_in" to="~reset_map" />
       <remap from="~save_map_in" to="~save_map" />
       <remap from="~load_map_in" to="~load_map" />
 
