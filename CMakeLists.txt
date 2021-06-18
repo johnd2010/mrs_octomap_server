@@ -26,7 +26,6 @@ set(PACKAGE_DEPENDENCIES
   octomap_msgs
   mrs_lib
   laser_geometry
-  ouster_ros
   mrs_msgs
   )
 

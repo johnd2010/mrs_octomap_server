@@ -26,7 +26,7 @@ local_map:
   enabled: true
 
   # the bounding box distance of the local map
-  distance: 50.0
+  distance: 20.0
 
   # the publisher rate of the local map
   rate: 10.0 # [Hz]

@@ -1,6 +1,6 @@
 /* includes //{ */
 
-#include "ros/init.h"
+#include <ros/init.h>
 #include <ros/ros.h>
 #include <nodelet/nodelet.h>
 
@@ -51,15 +51,13 @@
 #include <mrs_msgs/String.h>
 #include <mrs_msgs/ControlManagerDiagnostics.h>
 
+#include <filesystem>
+
 #include <mrs_octomap_server/conversions.h>
 
 #include <laser_geometry/laser_geometry.h>
 
-#include <ouster_ros/point.h>
-
 #include <cmath>
-
-/* #include <ouster_ros/OSConfigSrv.h> */
 
 //}
 
@@ -78,9 +76,6 @@ struct xyz_lut_t
   vec3s_t directions;  // a matrix of normalized direction column vectors
   vec3s_t offsets;     // a matrix of offset vectors
 };
-
-using pt_t = ouster_ros::Point;
-using pc_t = pcl::PointCloud<pt_t>;
 
 //}
 
@@ -222,11 +217,7 @@ protected:
 
   virtual void insertPointCloud(const geometry_msgs::Vector3& sensorOrigin, const PCLPointCloud::ConstPtr& cloud, const PCLPointCloud::ConstPtr& free_cloud);
 
-  void initializeOusterLUT(const size_t w, const size_t h, const std::vector<double>& azimuth_angles_deg, const std::vector<double>& altitude_angles_deg,
-                           const double range_unit = 0.001, const double lidar_origin_to_beam_origin_mm = 0.0,
-                           const ouster::mat4d& tf = ouster::mat4d::Identity());
-
-  void initializeLidarLUTSimulation(const size_t w, const size_t h);
+  void initializeLidarLUT(const size_t w, const size_t h);
 
   xyz_lut_t m_sensor_3d_xyz_lut;
   bool      m_sensor_3d_params_enabled;
@@ -311,18 +302,7 @@ void OctomapServer::onInit() {
 
   if (m_sensor_3d_params_enabled) {
 
-    if (_simulation_) {
-
-      initializeLidarLUTSimulation(m_sensor_3d_hrays, m_sensor_3d_vrays);
-
-      ROS_INFO("[OctomapServer]: Ouster LUT model initialized (simulation)");
-
-    } else {
-
-      initializeOusterLUT(m_sensor_3d_hrays, m_sensor_3d_vrays, ouster::sensor::gen1_azimuth_angles, ouster::sensor::gen1_altitude_angles);
-
-      ROS_INFO("[OctomapServer]: Ouster LUT model initialized (real hw)");
-    }
+    initializeLidarLUT(m_sensor_3d_hrays, m_sensor_3d_vrays);
   }
 
   //}
@@ -389,7 +369,7 @@ void OctomapServer::onInit() {
   shopts.no_message_timeout = mrs_lib::no_timeout;
   shopts.threadsafe         = true;
   shopts.autostart          = true;
-  shopts.queue_size         = 10;
+  shopts.queue_size         = 1;
   shopts.transport_hints    = ros::TransportHints().tcpNoDelay();
 
   sh_control_manager_diag_ = mrs_lib::SubscribeHandler<mrs_msgs::ControlManagerDiagnostics>(shopts, "control_manager_diagnostics_in");
@@ -435,7 +415,7 @@ void OctomapServer::onInit() {
 
 // | --------------------- topic callbacks -------------------- |
 
-/* OctomapServer::insertLaserScanCallback() //{ */
+/* insertLaserScanCallback() //{ */
 
 void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr& scan) {
 
@@ -507,7 +487,7 @@ void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr
 
 //}
 
-/* OctomapServer::insertCloudCallback() //{ */
+/* insertCloudCallback() //{ */
 
 void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud) {
 
@@ -603,7 +583,7 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
 
 // | -------------------- service callbacks ------------------- |
 
-/* OctomapServer::callbackLoadMap() //{ */
+/* callbackLoadMap() //{ */
 
 bool OctomapServer::callbackLoadMap([[maybe_unused]] mrs_msgs::String::Request& req, [[maybe_unused]] mrs_msgs::String::Response& res) {
 
@@ -631,7 +611,7 @@ bool OctomapServer::callbackLoadMap([[maybe_unused]] mrs_msgs::String::Request& 
 
 //}
 
-/* OctomapServer::callbackSaveMap() //{ */
+/* callbackSaveMap() //{ */
 
 bool OctomapServer::callbackSaveMap([[maybe_unused]] mrs_msgs::String::Request& req, [[maybe_unused]] mrs_msgs::String::Response& res) {
 
@@ -657,7 +637,7 @@ bool OctomapServer::callbackSaveMap([[maybe_unused]] mrs_msgs::String::Request& 
 
 //}
 
-/* OctomapServer::callbackResetMap() //{ */
+/* callbackResetMap() //{ */
 
 bool OctomapServer::callbackResetMap([[maybe_unused]] std_srvs::Empty::Request& req, [[maybe_unused]] std_srvs::Empty::Response& resp) {
 
@@ -936,31 +916,7 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
 /* initializeLidarLUT() //{ */
 
-void OctomapServer::initializeOusterLUT(const size_t w, const size_t h, const std::vector<double>& azimuth_angles_deg,
-                                        const std::vector<double>& altitude_angles_deg, const double range_unit, const double lidar_origin_to_beam_origin_mm,
-                                        const ouster::mat4d& tf) {
-
-  ouster::XYZLut xyz_lut;
-
-  xyz_lut = ouster::make_xyz_lut(w, h, range_unit, lidar_origin_to_beam_origin_mm, tf, azimuth_angles_deg, altitude_angles_deg);
-
-  if (xyz_lut.direction.cols() != xyz_lut.offset.cols()) {
-    ROS_ERROR_STREAM("[TODO]: XYZ LUT doesn't have the correct number of elements (number of direction vectors "
-                     << xyz_lut.direction.cols() << " is not equal to the number of offset vectors " << xyz_lut.offset.cols() << ")!");
-  }
-
-  m_sensor_3d_xyz_lut = {xyz_lut.direction.cast<float>().transpose(), xyz_lut.offset.cast<float>().transpose()};
-  m_sensor_3d_xyz_lut.directions.colwise().normalize();
-
-  ROS_INFO_STREAM("[TODO]: Initialized XYZ LUT table with " << m_sensor_3d_xyz_lut.directions.cols() << " elements.");
-}
-
-//}
-
-/* initializeLidarLUTSimulation() //{ */
-
-// copied directly from the simulation plugin
-void OctomapServer::initializeLidarLUTSimulation(const size_t w, const size_t h) {
+void OctomapServer::initializeLidarLUT(const size_t w, const size_t h) {
 
   const int                                       rangeCount         = w;
   const int                                       verticalRangeCount = h;
@@ -1080,13 +1036,29 @@ bool OctomapServer::saveToFile(const std::string& filename) {
 
   std::scoped_lock lock(mutex_octree_);
 
-  std::string file_path = _map_path_ + "/" + filename + ".ot";
+  std::string file_path        = _map_path_ + "/" + filename + ".ot";
+  std::string tmp_file_path    = _map_path_ + "/tmp_" + filename + ".ot";
+  std::string backup_file_path = _map_path_ + "/" + filename + "_backup.ot";
+
+  try {
+    std::filesystem::rename(file_path, backup_file_path);
+  }
+  catch (std::filesystem::filesystem_error& e) {
+    ROS_ERROR("[OctomapServer]: failed to copy map to the backup path");
+  }
 
   std::string suffix = file_path.substr(file_path.length() - 3, 3);
 
-  if (!octree_->write(file_path)) {
+  if (!octree_->write(tmp_file_path)) {
     ROS_ERROR("[OctomapServer]: error writing to file '%s'", file_path.c_str());
     return false;
+  }
+
+  try {
+    std::filesystem::rename(tmp_file_path, file_path);
+  }
+  catch (std::filesystem::filesystem_error& e) {
+    ROS_ERROR("[OctomapServer]: failed to copy map to the backup path");
   }
 
   return true;
@@ -1094,7 +1066,7 @@ bool OctomapServer::saveToFile(const std::string& filename) {
 
 //}
 
-/* OctomapServer::copyInsideBBX() //{ */
+/* copyInsideBBX() //{ */
 
 bool OctomapServer::copyInsideBBX(std::shared_ptr<OcTreeT>& from, std::shared_ptr<OcTreeT>& to, const octomap::point3d& p_min, const octomap::point3d& p_max) {
 
@@ -1164,7 +1136,6 @@ bool OctomapServer::createLocalMap(const std::string frame_id, const double radi
     std::scoped_lock lock(mutex_octree_);
 
     octree->clear();
-    // clear the surroundings of the robot
 
     const octomap::point3d p_min =
         octomap::point3d(float(robot_x - _local_map_distance_), float(robot_y - _local_map_distance_), float(robot_z - _local_map_distance_));

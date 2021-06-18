@@ -27,7 +27,6 @@
   <depend>mrs_lib</depend>
   <depend>mrs_msgs</depend>
   <depend>laser_geometry</depend>
-  <depend>ouster_ros</depend>
 
   <export>
     <nodelet plugin="${prefix}/plugins.xml" />
