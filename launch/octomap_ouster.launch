@@ -50,6 +50,7 @@
       <remap from="~laser_scan_in" to="$(arg 2d_lidar_topic)" />
 
       <remap from="~control_manager_diagnostics_in" to="control_manager/diagnostics" />
+      <remap from="~height_in" to="odometry/height" />
 
       <!-- topics out -->
 

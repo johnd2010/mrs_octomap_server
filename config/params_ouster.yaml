@@ -9,6 +9,9 @@ persistency:
   # save mapevery "n" seconds, will be save only when flying_normally == true
   save_time: 10.0 # [s]
 
+  # automatically aligns altitude after start
+  align_altitude: true
+
 global_map:
 
   # the publisher rate of the full map
@@ -26,7 +29,7 @@ local_map:
   enabled: true
 
   # the bounding box distance of the local map
-  distance: 20.0
+  distance: 50.0
 
   # the publisher rate of the local map
   rate: 10.0 # [Hz]
