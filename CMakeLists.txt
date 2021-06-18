@@ -51,7 +51,7 @@ set(Eigen_LIBRARIES ${Eigen_LIBRARIES})
 
 catkin_package(
   INCLUDE_DIRS include
-  LIBRARIES MrsOctomapConversions MrsOctomapServer
+  LIBRARIES MrsOctomapServer
   CATKIN_DEPENDS ${PACKAGE_DEPENDENCIES}
   DEPENDS OCTOMAP
   )
@@ -64,27 +64,11 @@ include_directories(
   ${OCTOMAP_INCLUDE_DIRS}
   )
 
-# MrsOctomapConversions
-
-add_library(MrsOctomapConversions SHARED
-  src/conversions.cpp
-  )
-
-add_dependencies(MrsOctomapConversions
-  ${${PROJECT_NAME}_EXPORTED_TARGETS}
-  ${catkin_EXPORTED_TARGETS}
-  )
-
-target_link_libraries(MrsOctomapConversions
-  ${catkin_LIBRARIES}
-  ${PCL_LIBRARIES}
-  ${OCTOMAP_LIBRARIES}
-  )
-
 # MrsOctomapServer
 
 add_library(MrsOctomapServer SHARED
   src/octomap_server.cpp
+  src/conversions.cpp
   )
 
 add_dependencies(MrsOctomapServer
@@ -93,7 +77,6 @@ add_dependencies(MrsOctomapServer
   )
 
 target_link_libraries(MrsOctomapServer
-  MrsOctomapConversions
   ${catkin_LIBRARIES}
   ${PCL_LIBRARIES}
   ${OCTOMAP_LIBRARIES}

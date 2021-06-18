@@ -1,5 +1,6 @@
 /* includes //{ */
 
+#include "ros/init.h"
 #include <ros/ros.h>
 #include <nodelet/nodelet.h>
 
@@ -45,8 +46,10 @@
 
 #include <mrs_lib/param_loader.h>
 #include <mrs_lib/transformer.h>
+#include <mrs_lib/subscribe_handler.h>
 
 #include <mrs_msgs/String.h>
+#include <mrs_msgs/ControlManagerDiagnostics.h>
 
 #include <mrs_octomap_server/conversions.h>
 
@@ -101,7 +104,6 @@ public:
   bool callbackLoadMap(mrs_msgs::String::Request& req, [[maybe_unused]] mrs_msgs::String::Response& resp);
   bool callbackSaveMap(mrs_msgs::String::Request& req, [[maybe_unused]] mrs_msgs::String::Response& resp);
 
-  bool callbackClearBBX(octomap_msgs::BoundingBoxQueryRequest& req, octomap_msgs::BoundingBoxQueryRequest& resp);
   bool callbackResetMap(std_srvs::Empty::Request& req, std_srvs::Empty::Response& resp);
 
   virtual void insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud);
@@ -114,6 +116,8 @@ protected:
   bool            is_initialized_;
 
   // | -------------------- topic subscribers ------------------- |
+
+  mrs_lib::SubscribeHandler<mrs_msgs::ControlManagerDiagnostics> sh_control_manager_diag_;
 
   std::unique_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> m_pointCloudSub;
   std::unique_ptr<message_filters::Subscriber<sensor_msgs::LaserScan>>   m_laserScanSub;
@@ -128,7 +132,6 @@ protected:
 
   // | -------------------- service serviers -------------------- |
 
-  ros::ServiceServer ss_clear_bbx_;
   ros::ServiceServer ss_reset_map_;
   ros::ServiceServer ss_save_map_;
   ros::ServiceServer ss_load_map_;
@@ -142,9 +145,16 @@ protected:
   ros::Timer timer_local_map_;
   void       timerLocalMap([[maybe_unused]] const ros::TimerEvent& event);
 
+  ros::Timer timer_persistency_;
+  void       timerPersistency([[maybe_unused]] const ros::TimerEvent& event);
+
   // | ----------------------- parameters ----------------------- |
 
   bool _simulation_;
+
+  bool        _persistency_enabled_;
+  std::string _persistency_map_name_;
+  double      _persistency_save_time_;
 
   bool _global_map_publish_full_;
   bool _global_map_publish_binary_;
@@ -163,7 +173,11 @@ protected:
   std::shared_ptr<OcTreeT> octree_local_;
   std::mutex               mutex_octree_local_;
 
-  double cloud_insertion_time_ = 0;
+  double     avg_time_cloud_insertion_ = 0;
+  std::mutex mutex_avg_time_cloud_insertion_;
+
+  double     avg_time_local_map_processing_ = 0;
+  std::mutex mutex_avg_time_local_map_processing_;
 
   octomap::KeyRay    m_keyRay;  // temp storage for ray casting
   octomap::OcTreeKey m_updateBBXMin;
@@ -231,9 +245,15 @@ void OctomapServer::onInit() {
 
   ros::Time::waitForValid();
 
+  /* params //{ */
+
   mrs_lib::ParamLoader param_loader(nh_, ros::this_node::getName());
 
   param_loader.loadParam("simulation", _simulation_);
+
+  param_loader.loadParam("persistency/enabled", _persistency_enabled_);
+  param_loader.loadParam("persistency/save_time", _persistency_save_time_);
+  param_loader.loadParam("persistency/map_name", _persistency_map_name_);
 
   param_loader.loadParam("global_map/rate", _global_map_rate_);
   param_loader.loadParam("global_map/compress", _global_map_compress_);
@@ -271,6 +291,8 @@ void OctomapServer::onInit() {
     ROS_ERROR("[%s]: Could not load all non-optional parameters. Shutting down.", ros::this_node::getName().c_str());
     ros::requestShutdown();
   }
+
+  //}
 
   /* check params //{ */
 
@@ -324,6 +346,24 @@ void OctomapServer::onInit() {
 
   //}
 
+  /* persistency //{ */
+
+  if (_persistency_enabled_) {
+
+    bool success = loadFromFile(_persistency_map_name_);
+
+    if (success) {
+      ROS_INFO("[OctomapServer]: loaded persistency map");
+    } else {
+
+      ROS_ERROR("[OctomapServer]: failed to load the persistency map, turning persistency off");
+
+      _persistency_enabled_ = false;
+    }
+  }
+
+  //}
+
   /* tf_listener //{ */
 
   this->m_buffer.setUsingDedicatedThread(true);
@@ -343,6 +383,17 @@ void OctomapServer::onInit() {
 
   /* subscribers //{ */
 
+  mrs_lib::SubscribeHandlerOptions shopts;
+  shopts.nh                 = nh_;
+  shopts.node_name          = "OctomapServer";
+  shopts.no_message_timeout = mrs_lib::no_timeout;
+  shopts.threadsafe         = true;
+  shopts.autostart          = true;
+  shopts.queue_size         = 10;
+  shopts.transport_hints    = ros::TransportHints().tcpNoDelay();
+
+  sh_control_manager_diag_ = mrs_lib::SubscribeHandler<mrs_msgs::ControlManagerDiagnostics>(shopts, "control_manager_diagnostics_in");
+
   // Point Cloud
   m_pointCloudSub = std::make_unique<message_filters::Subscriber<sensor_msgs::PointCloud2>>(nh_, "point_cloud_in", 5);
   m_pointCloudSub->registerCallback(std::bind(&OctomapServer::insertCloudCallback, this, ph::_1));
@@ -355,7 +406,6 @@ void OctomapServer::onInit() {
 
   /* service servers //{ */
 
-  this->ss_clear_bbx_ = nh_.advertiseService("clear_bbx", &OctomapServer::callbackClearBBX, this);
   this->ss_reset_map_ = nh_.advertiseService("reset_map_in", &OctomapServer::callbackResetMap, this);
   this->ss_save_map_  = nh_.advertiseService("save_map_in", &OctomapServer::callbackSaveMap, this);
   this->ss_load_map_  = nh_.advertiseService("load_map_in", &OctomapServer::callbackLoadMap, this);
@@ -368,6 +418,10 @@ void OctomapServer::onInit() {
 
   if (_local_map_enabled_) {
     timer_local_map_ = nh_.createTimer(ros::Rate(_local_map_rate_), &OctomapServer::timerLocalMap, this);
+  }
+
+  if (_persistency_enabled_) {
+    timer_persistency_ = nh_.createTimer(ros::Rate(1.0 / _persistency_save_time_), &OctomapServer::timerPersistency, this);
   }
 
   //}
@@ -532,14 +586,16 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
   const octomap::point3d sensor_origin = octomap::pointTfToOctomap(sensorToWorldTf.transform.translation);
 
   {
+    std::scoped_lock lock(mutex_avg_time_cloud_insertion_);
+
     ros::Time time_end = ros::Time::now();
 
     double exec_duration = (time_end - time_start).toSec();
 
-    double coef           = 0.95;
-    cloud_insertion_time_ = coef * cloud_insertion_time_ + (1.0 - coef) * exec_duration;
+    double coef               = 0.95;
+    avg_time_cloud_insertion_ = coef * avg_time_cloud_insertion_ + (1.0 - coef) * exec_duration;
 
-    ROS_INFO_THROTTLE(5.0, "[OctomapServer]: avg cloud insertion time = %.3f sec", cloud_insertion_time_);
+    ROS_INFO_THROTTLE(5.0, "[OctomapServer]: avg cloud insertion time = %.3f sec", avg_time_cloud_insertion_);
   }
 }
 
@@ -557,7 +613,7 @@ bool OctomapServer::callbackLoadMap([[maybe_unused]] mrs_msgs::String::Request& 
 
   ROS_INFO("[OctomapServer]: loading map");
 
-  bool success = loadFromFile(_map_path_ + "/" + req.value + ".ot");
+  bool success = loadFromFile(req.value);
 
   if (success) {
 
@@ -583,20 +639,18 @@ bool OctomapServer::callbackSaveMap([[maybe_unused]] mrs_msgs::String::Request& 
     return false;
   }
 
-  std::scoped_lock lock(mutex_octree_);
+  bool success = saveToFile(req.value);
 
-  std::string mapname = _map_path_ + "/" + req.value + ".ot";
+  if (success) {
 
-  ROS_INFO("Map received (%zu nodes, %f m res), saving to %s", octree_->size(), octree_->getResolution(), mapname.c_str());
+    res.message = "map saved";
+    res.success = true;
 
-  std::string suffix = mapname.substr(mapname.length() - 3, 3);
+  } else {
 
-  if (!octree_->write(mapname)) {
-    ROS_ERROR("Error writing to file %s", mapname.c_str());
+    res.message = "map saving failed";
+    res.success = false;
   }
-
-  res.message = "saved";
-  res.success = true;
 
   return true;
 }
@@ -614,26 +668,6 @@ bool OctomapServer::callbackResetMap([[maybe_unused]] std_srvs::Empty::Request& 
   }
 
   ROS_INFO("[OctomapServer]: octomap cleared");
-
-  return true;
-}
-
-//}
-
-/* OctomapServer::callbackClearBBX() //{ */
-
-bool OctomapServer::callbackClearBBX(octomap_msgs::BoundingBoxQueryRequest& req, [[maybe_unused]] octomap_msgs::BoundingBoxQueryRequest& resp) {
-
-  octomap::point3d min = octomap::pointMsgToOctomap(req.min);
-  octomap::point3d max = octomap::pointMsgToOctomap(req.max);
-
-  double thresMin = octree_->getClampingThresMin();
-
-  for (auto it = octree_->begin_leafs_bbx(min, max), end = octree_->end_leafs_bbx(); it != end; ++it) {
-    it->setLogOdds(octomap::logodds(thresMin));
-  }
-
-  octree_->updateInnerOccupancy();
 
   return true;
 }
@@ -749,9 +783,52 @@ void OctomapServer::timerLocalMap([[maybe_unused]] const ros::TimerEvent& evt) {
 
 //}
 
+/* timerPersistency() //{ */
+
+void OctomapServer::timerPersistency([[maybe_unused]] const ros::TimerEvent& evt) {
+
+  if (!is_initialized_) {
+    return;
+  }
+
+  ROS_INFO_ONCE("[OctomapServer]: persistency timer spinning");
+
+  if (!sh_control_manager_diag_.hasMsg()) {
+
+    ROS_WARN_THROTTLE(1.0, "[OctomapServer]: missing control manager diagnostics, won't save the map automatically!");
+    return;
+
+  } else {
+
+    ros::Time last_time = sh_control_manager_diag_.lastMsgTime();
+
+    if ((ros::Time::now() - last_time).toSec() > 1.0) {
+      ROS_WARN_THROTTLE(1.0, "[OctomapServer]: control manager diagnostics too old, won't save the map automatically!");
+      return;
+    }
+  }
+
+  mrs_msgs::ControlManagerDiagnosticsConstPtr control_manager_diag = sh_control_manager_diag_.getMsg();
+
+  if (control_manager_diag->flying_normally) {
+
+    ROS_INFO_THROTTLE(1.0, "[OctomapServer]: saving the map");
+
+    bool success = saveToFile(_persistency_map_name_);
+
+    if (success) {
+      ROS_INFO("[OctomapServer]: persistent map saved");
+    } else {
+      ROS_ERROR("[OctomapServer]: failed to saved persistent map");
+    }
+  }
+}
+
+//}
+
 // | ------------------------ routines ------------------------ |
 
-/* OctomapServer::insertPointCloud() //{ */
+/* insertPointCloud() //{ */
 
 void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginTf, const PCLPointCloud::ConstPtr& cloud,
                                      const PCLPointCloud::ConstPtr& free_vectors_cloud) {
@@ -937,25 +1014,27 @@ void OctomapServer::initializeLidarLUTSimulation(const size_t w, const size_t h)
 
 //}
 
-/* OctomapServer::loadFromFile() //{ */
+/* loadFromFile() //{ */
 
 bool OctomapServer::loadFromFile(const std::string& filename) {
+
+  std::string file_path = _map_path_ + "/" + filename + ".ot";
 
   {
     std::scoped_lock lock(mutex_octree_);
 
-    if (filename.length() <= 3)
+    if (file_path.length() <= 3)
       return false;
 
-    std::string suffix = filename.substr(filename.length() - 3, 3);
+    std::string suffix = file_path.substr(file_path.length() - 3, 3);
 
     if (suffix == ".bt") {
-      if (!octree_->readBinary(filename)) {
+      if (!octree_->readBinary(file_path)) {
         return false;
       }
     } else if (suffix == ".ot") {
 
-      auto tree = octomap::AbstractOcTree::read(filename);
+      auto tree = octomap::AbstractOcTree::read(file_path);
       if (!tree) {
         return false;
       }
@@ -964,16 +1043,13 @@ bool OctomapServer::loadFromFile(const std::string& filename) {
       octree_         = std::shared_ptr<OcTreeT>(octree);
 
       if (!octree_) {
-        std::string msg = "Could not read OcTree in file";
-        ROS_INFO("[%s]: %s", ros::this_node::getName().c_str(), msg.c_str());
+        ROS_ERROR("[OctomapServer]: could not read OcTree file");
         return false;
       }
 
     } else {
       return false;
     }
-
-    ROS_INFO("[%s]: Octomap file %s loaded (%zu nodes).", ros::this_node::getName().c_str(), filename.c_str(), octree_->size());
 
     m_treeDepth    = octree_->getTreeDepth();
     m_maxTreeDepth = m_treeDepth;
@@ -998,57 +1074,20 @@ bool OctomapServer::loadFromFile(const std::string& filename) {
 
 //}
 
-/* OctomapServer::saveToFile() //{ */
+/* saveToFile() //{ */
 
 bool OctomapServer::saveToFile(const std::string& filename) {
 
-  if (filename.length() <= 3)
-    return false;
+  std::scoped_lock lock(mutex_octree_);
 
-  std::string suffix = filename.substr(filename.length() - 3, 3);
+  std::string file_path = _map_path_ + "/" + filename + ".ot";
 
-  if (suffix == ".bt") {
-    if (!octree_->readBinary(filename)) {
-      return false;
-    }
-  } else if (suffix == ".ot") {
+  std::string suffix = file_path.substr(file_path.length() - 3, 3);
 
-    auto tree = octomap::AbstractOcTree::read(filename);
-    if (!tree) {
-      return false;
-    }
-
-    OcTreeT* octree = dynamic_cast<OcTreeT*>(tree);
-    octree_         = std::shared_ptr<OcTreeT>(octree);
-
-    if (!octree_) {
-      std::string msg = "Could not read OcTree in file";
-      ROS_INFO("[%s]: %s", ros::this_node::getName().c_str(), msg.c_str());
-      return false;
-    }
-
-  } else {
+  if (!octree_->write(file_path)) {
+    ROS_ERROR("[OctomapServer]: error writing to file '%s'", file_path.c_str());
     return false;
   }
-
-  ROS_INFO("[%s]: Octomap file %s loaded (%zu nodes).", ros::this_node::getName().c_str(), filename.c_str(), octree_->size());
-
-  m_treeDepth    = octree_->getTreeDepth();
-  m_maxTreeDepth = m_treeDepth;
-  m_res          = octree_->getResolution();
-
-  double minX, minY, minZ;
-  double maxX, maxY, maxZ;
-  octree_->getMetricMin(minX, minY, minZ);
-  octree_->getMetricMax(maxX, maxY, maxZ);
-
-  m_updateBBXMin[0] = octree_->coordToKey(minX);
-  m_updateBBXMin[1] = octree_->coordToKey(minY);
-  m_updateBBXMin[2] = octree_->coordToKey(minZ);
-
-  m_updateBBXMax[0] = octree_->coordToKey(maxX);
-  m_updateBBXMax[1] = octree_->coordToKey(maxY);
-  m_updateBBXMax[2] = octree_->coordToKey(maxZ);
 
   return true;
 }
@@ -1099,8 +1138,6 @@ bool OctomapServer::createLocalMap(const std::string frame_id, const double radi
 
   ros::Time time_start = ros::Time::now();
 
-  ROS_INFO_THROTTLE(1.0, "[OctomapServer]: creating the local map");
-
   // get the position of the robot frame in the map
   geometry_msgs::TransformStamped world_to_robot;
 
@@ -1120,6 +1157,8 @@ bool OctomapServer::createLocalMap(const std::string frame_id, const double radi
   double robot_y = world_to_robot.transform.translation.y;
   double robot_z = world_to_robot.transform.translation.z;
 
+  bool success;
+
   // copy the maps
   {
     std::scoped_lock lock(mutex_octree_);
@@ -1132,15 +1171,23 @@ bool OctomapServer::createLocalMap(const std::string frame_id, const double radi
     const octomap::point3d p_max =
         octomap::point3d(float(robot_x + _local_map_distance_), float(robot_y + _local_map_distance_), float(robot_z + _local_map_distance_));
 
-    if (copyInsideBBX(octree_, octree, p_min, p_max)) {
-
-      ROS_INFO_THROTTLE(1.0, "[OctomapServer]: ... took %.2f s", (ros::Time::now() - time_start).toSec());
-
-      return true;
-    } else {
-      return false;
-    }
+    success = copyInsideBBX(octree_, octree, p_min, p_max);
   }
+
+  {
+    std::scoped_lock lock(mutex_avg_time_local_map_processing_);
+
+    ros::Time time_end = ros::Time::now();
+
+    double exec_duration = (time_end - time_start).toSec();
+
+    double coef                    = 0.95;
+    avg_time_local_map_processing_ = coef * avg_time_local_map_processing_ + (1.0 - coef) * exec_duration;
+
+    ROS_INFO_THROTTLE(5.0, "[OctomapServer]: avg local map creation time = %.3f sec", avg_time_local_map_processing_);
+  }
+
+  return success;
 }
 
 //}

@@ -1,5 +1,14 @@
 resolution: 1.00 # [m]
 
+persistency:
+
+  enabled: true
+
+  map_name: "default"
+
+  # save mapevery "n" seconds, will be save only when flying_normally == true
+  save_time: 10.0 # [s]
+
 global_map:
 
   # the publisher rate of the full map

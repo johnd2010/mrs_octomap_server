@@ -49,6 +49,8 @@
       <!-- 2D lidar -->
       <remap from="~laser_scan_in" to="$(arg 2d_lidar_topic)" />
 
+      <remap from="~control_manager_diagnostics_in" to="control_manager/diagnostics" />
+
       <!-- topics out -->
 
       <remap from="~octomap_global_full_out" to="~octomap_global_full" />
@@ -58,7 +60,6 @@
       <remap from="~octomap_local_binary_out" to="~octomap_local_binary" />
 
         <!-- services -->
-      <remap from="~clear_bbx" to="~clear_bbx" />
       <remap from="~reset_map_in" to="~reset_map" />
       <remap from="~save_map_in" to="~save_map" />
       <remap from="~load_map_in" to="~load_map" />
