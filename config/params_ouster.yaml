@@ -10,7 +10,11 @@ persistency:
   save_time: 10.0 # [s]
 
   # automatically aligns altitude after start
-  align_altitude: true
+  align_altitude:
+
+    enabled: true
+
+    ground_detection_distance: 2.0 # [m]
 
 global_map:
 

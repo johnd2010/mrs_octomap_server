@@ -156,7 +156,9 @@ protected:
   bool        _persistency_enabled_;
   std::string _persistency_map_name_;
   double      _persistency_save_time_;
-  bool        _persistency_align_altitude_;
+
+  bool   _persistency_align_altitude_enabled_;
+  double _persistency_align_altitude_distance_;
 
   bool _global_map_publish_full_;
   bool _global_map_publish_binary_;
@@ -188,7 +190,7 @@ protected:
   double      m_maxRange;
   std::string _world_frame_;
   std::string _robot_frame_;
-  double      m_res;
+  double      octree_resolution_;
   unsigned    m_treeDepth;
   unsigned    m_maxTreeDepth;
   double      m_minSizeX;
@@ -265,7 +267,8 @@ void OctomapServer::onInit() {
   param_loader.loadParam("persistency/enabled", _persistency_enabled_);
   param_loader.loadParam("persistency/save_time", _persistency_save_time_);
   param_loader.loadParam("persistency/map_name", _persistency_map_name_);
-  param_loader.loadParam("persistency/align_altitude", _persistency_align_altitude_);
+  param_loader.loadParam("persistency/align_altitude/enabled", _persistency_align_altitude_enabled_);
+  param_loader.loadParam("persistency/align_altitude/ground_detection_distance", _persistency_align_altitude_distance_);
 
   param_loader.loadParam("global_map/rate", _global_map_rate_);
   param_loader.loadParam("global_map/compress", _global_map_compress_);
@@ -278,7 +281,7 @@ void OctomapServer::onInit() {
   param_loader.loadParam("local_map/publish_full", _local_map_publish_full_);
   param_loader.loadParam("local_map/publish_binary", _local_map_publish_binary_);
 
-  param_loader.loadParam("resolution", m_res);
+  param_loader.loadParam("resolution", octree_resolution_);
   param_loader.loadParam("world_frame_id", _world_frame_);
   param_loader.loadParam("robot_frame_id", _robot_frame_);
 
@@ -329,13 +332,13 @@ void OctomapServer::onInit() {
 
   /* initialize octomap object & params //{ */
 
-  octree_ = std::make_shared<OcTreeT>(m_res);
+  octree_ = std::make_shared<OcTreeT>(octree_resolution_);
   octree_->setProbHit(_probHit_);
   octree_->setProbMiss(_probMiss_);
   octree_->setClampingThresMin(_thresMin_);
   octree_->setClampingThresMax(_thresMax_);
 
-  octree_local_ = std::make_shared<OcTreeT>(m_res);
+  octree_local_ = std::make_shared<OcTreeT>(octree_resolution_);
   octree_local_->setProbHit(_probHit_);
   octree_local_->setProbMiss(_probMiss_);
   octree_local_->setClampingThresMin(_thresMin_);
@@ -358,7 +361,7 @@ void OctomapServer::onInit() {
     }
   }
 
-  if (_persistency_enabled_ && _persistency_align_altitude_) {
+  if (_persistency_enabled_ && _persistency_align_altitude_enabled_) {
     octree_initialized_ = false;
   } else {
     octree_initialized_ = true;
@@ -426,7 +429,7 @@ void OctomapServer::onInit() {
     timer_persistency_ = nh_.createTimer(ros::Rate(1.0 / _persistency_save_time_), &OctomapServer::timerPersistency, this);
   }
 
-  if (_persistency_enabled_ && _persistency_align_altitude_) {
+  if (_persistency_enabled_ && _persistency_align_altitude_enabled_) {
     timer_altitude_alignment_ = nh_.createTimer(ros::Rate(1.0), &OctomapServer::timerAltitudeAlignment, this);
   }
 
@@ -618,7 +621,7 @@ bool OctomapServer::callbackLoadMap([[maybe_unused]] mrs_msgs::String::Request& 
 
   if (success) {
 
-    if (_persistency_enabled_ && _persistency_align_altitude_) {
+    if (_persistency_enabled_ && _persistency_align_altitude_enabled_) {
       octree_initialized_ = false;
 
       timer_altitude_alignment_.start();
@@ -1189,9 +1192,9 @@ bool OctomapServer::loadFromFile(const std::string& filename) {
       return false;
     }
 
-    m_treeDepth    = octree_->getTreeDepth();
-    m_maxTreeDepth = m_treeDepth;
-    m_res          = octree_->getResolution();
+    m_treeDepth        = octree_->getTreeDepth();
+    m_maxTreeDepth     = m_treeDepth;
+    octree_resolution_ = octree_->getResolution();
 
     double minX, minY, minZ;
     double maxX, maxY, maxZ;
@@ -1307,8 +1310,8 @@ void OctomapServer::expandNodeRecursive(std::shared_ptr<OcTreeT>& octree, octoma
 
 std::optional<double> OctomapServer::getGroundZ(std::shared_ptr<OcTreeT>& octree, const double& x, const double& y) {
 
-  octomap::point3d p_min(float(x) - 2, float(y) - 5, -1000);
-  octomap::point3d p_max(float(x) + 2, float(y) + 5, +1000);
+  octomap::point3d p_min(float(x - _persistency_align_altitude_distance_), float(y - _persistency_align_altitude_distance_), -10000);
+  octomap::point3d p_max(float(x + _persistency_align_altitude_distance_), float(y + _persistency_align_altitude_distance_), 10000);
 
   for (OcTreeT::leaf_bbx_iterator it = octree->begin_leafs_bbx(p_min, p_max), end = octree->end_leafs_bbx(); it != end; ++it) {
 
@@ -1339,7 +1342,7 @@ std::optional<double> OctomapServer::getGroundZ(std::shared_ptr<OcTreeT>& octree
 
     for (int i = 0; i < occupied_points.size(); i++) {
       if (occupied_points[i].z() > max_z) {
-        max_z = occupied_points[i].z();
+        max_z = occupied_points[i].z() - (octree_resolution_ / 2.0);
       }
     }
 
@@ -1361,7 +1364,7 @@ bool OctomapServer::translateMap(std::shared_ptr<OcTreeT>& octree, const double&
   octree->expand();
 
   // allocate the new future octree
-  std::shared_ptr<OcTreeT> octree_new = std::make_shared<OcTreeT>(m_res);
+  std::shared_ptr<OcTreeT> octree_new = std::make_shared<OcTreeT>(octree_resolution_);
   octree_new->setProbHit(_probHit_);
   octree_new->setProbMiss(_probMiss_);
   octree_new->setClampingThresMin(_thresMin_);
