@@ -25,16 +25,6 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/common/transforms.h>
 
-#include <message_filters/subscriber.h>
-#include <message_filters/time_synchronizer.h>
-
-#include <tf2/buffer_core.h>
-#include <tf2_ros/buffer.h>
-#include <tf2_ros/transform_listener.h>
-#include <tf2_ros/message_filter.h>
-#include <tf2/convert.h>
-#include <tf2/LinearMath/Transform.h>
-
 #include <Eigen/Geometry>
 
 #include <octomap_msgs/BoundingBoxQueryRequest.h>
@@ -47,6 +37,7 @@
 #include <mrs_lib/param_loader.h>
 #include <mrs_lib/transformer.h>
 #include <mrs_lib/subscribe_handler.h>
+#include <mrs_lib/mutex.h>
 
 #include <mrs_msgs/String.h>
 #include <mrs_msgs/ControlManagerDiagnostics.h>
@@ -102,12 +93,12 @@ public:
 
   bool callbackResetMap(std_srvs::Empty::Request& req, std_srvs::Empty::Response& resp);
 
-  virtual void insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud);
-  virtual void insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr& scan);
-  virtual bool loadFromFile(const std::string& filename);
-  virtual bool saveToFile(const std::string& filename);
+  void callbackPointCloud2(mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>& wrp);
+  void callbackLaserScan(mrs_lib::SubscribeHandler<sensor_msgs::LaserScan>& wrp);
+  bool loadFromFile(const std::string& filename);
+  bool saveToFile(const std::string& filename);
 
-protected:
+private:
   ros::NodeHandle nh_;
   bool            is_initialized_;
 
@@ -115,9 +106,8 @@ protected:
 
   mrs_lib::SubscribeHandler<mrs_msgs::ControlManagerDiagnostics> sh_control_manager_diag_;
   mrs_lib::SubscribeHandler<mrs_msgs::Float64Stamped>            sh_height_;
-
-  std::unique_ptr<message_filters::Subscriber<sensor_msgs::PointCloud2>> m_pointCloudSub;
-  std::unique_ptr<message_filters::Subscriber<sensor_msgs::LaserScan>>   m_laserScanSub;
+  mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>            sh_point_cloud_2_;
+  mrs_lib::SubscribeHandler<sensor_msgs::LaserScan>              sh_laser_scan_;
 
   // | ----------------------- publishers ----------------------- |
 
@@ -152,6 +142,8 @@ protected:
 
   bool        _simulation_;
   std::string _uav_name_;
+
+  double _robot_height_;
 
   bool        _persistency_enabled_;
   std::string _persistency_map_name_;
@@ -193,14 +185,8 @@ protected:
   double      octree_resolution_;
   unsigned    m_treeDepth;
   unsigned    m_maxTreeDepth;
-  double      m_minSizeX;
-  double      m_minSizeY;
-  bool        m_filterSpeckles;
   bool        _global_map_compress_;
   std::string _map_path_;
-
-  bool   m_filterGroundPlane;
-  double m_ZGroundFilterDistance;
 
   double _local_map_distance_;
   double _local_map_rate_;
@@ -269,6 +255,7 @@ void OctomapServer::onInit() {
   param_loader.loadParam("persistency/map_name", _persistency_map_name_);
   param_loader.loadParam("persistency/align_altitude/enabled", _persistency_align_altitude_enabled_);
   param_loader.loadParam("persistency/align_altitude/ground_detection_distance", _persistency_align_altitude_distance_);
+  param_loader.loadParam("persistency/align_altitude/robot_height", _robot_height_);
 
   param_loader.loadParam("global_map/rate", _global_map_rate_);
   param_loader.loadParam("global_map/compress", _global_map_compress_);
@@ -398,22 +385,16 @@ void OctomapServer::onInit() {
 
   sh_control_manager_diag_ = mrs_lib::SubscribeHandler<mrs_msgs::ControlManagerDiagnostics>(shopts, "control_manager_diagnostics_in");
   sh_height_               = mrs_lib::SubscribeHandler<mrs_msgs::Float64Stamped>(shopts, "height_in");
-
-  // Point Cloud
-  m_pointCloudSub = std::make_unique<message_filters::Subscriber<sensor_msgs::PointCloud2>>(nh_, "point_cloud_in", 5);
-  m_pointCloudSub->registerCallback(std::bind(&OctomapServer::insertCloudCallback, this, ph::_1));
-
-  // Laser scan
-  m_laserScanSub = std::make_unique<message_filters::Subscriber<sensor_msgs::LaserScan>>(nh_, "laser_scan_in", 5);
-  m_laserScanSub->registerCallback(std::bind(&OctomapServer::insertLaserScanCallback, this, ph::_1));
+  sh_point_cloud_2_        = mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>(shopts, "point_cloud_in", &OctomapServer::callbackPointCloud2, this);
+  sh_laser_scan_           = mrs_lib::SubscribeHandler<sensor_msgs::LaserScan>(shopts, "laser_scan_in", &OctomapServer::callbackLaserScan, this);
 
   //}
 
   /* service servers //{ */
 
-  this->ss_reset_map_ = nh_.advertiseService("reset_map_in", &OctomapServer::callbackResetMap, this);
-  this->ss_save_map_  = nh_.advertiseService("save_map_in", &OctomapServer::callbackSaveMap, this);
-  this->ss_load_map_  = nh_.advertiseService("load_map_in", &OctomapServer::callbackLoadMap, this);
+  ss_reset_map_ = nh_.advertiseService("reset_map_in", &OctomapServer::callbackResetMap, this);
+  ss_save_map_  = nh_.advertiseService("save_map_in", &OctomapServer::callbackSaveMap, this);
+  ss_load_map_  = nh_.advertiseService("load_map_in", &OctomapServer::callbackLoadMap, this);
 
   //}
 
@@ -446,7 +427,7 @@ void OctomapServer::onInit() {
 
 /* insertLaserScanCallback() //{ */
 
-void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr& scan) {
+void OctomapServer::callbackLaserScan(mrs_lib::SubscribeHandler<sensor_msgs::LaserScan>& wrp) {
 
   if (!is_initialized_) {
     return;
@@ -455,6 +436,8 @@ void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr
   if (!octree_initialized_) {
     return;
   }
+
+  sensor_msgs::LaserScanConstPtr scan = wrp.getMsg();
 
   PCLPointCloud::Ptr pc              = boost::make_shared<PCLPointCloud>();
   PCLPointCloud::Ptr free_vectors_pc = boost::make_shared<PCLPointCloud>();
@@ -516,7 +499,7 @@ void OctomapServer::insertLaserScanCallback(const sensor_msgs::LaserScanConstPtr
 
 /* insertCloudCallback() //{ */
 
-void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& cloud) {
+void OctomapServer::callbackPointCloud2(mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>& wrp) {
 
   if (!is_initialized_) {
     return;
@@ -525,6 +508,8 @@ void OctomapServer::insertCloudCallback(const sensor_msgs::PointCloud2ConstPtr& 
   if (!octree_initialized_) {
     return;
   }
+
+  sensor_msgs::PointCloud2ConstPtr cloud = wrp.getMsg();
 
   ros::Time time_start = ros::Time::now();
 
@@ -971,7 +956,7 @@ void OctomapServer::timerAltitudeAlignment([[maybe_unused]] const ros::TimerEven
   if (align_using_height) {
     ground_z_should_be = robot_z - sh_height_.getMsg()->value;
   } else {
-    ground_z_should_be = robot_z;
+    ground_z_should_be = robot_z - _robot_height_;
   }
 
   double offset = ground_z_should_be - ground_z.value();

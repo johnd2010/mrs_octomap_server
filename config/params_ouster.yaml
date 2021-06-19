@@ -16,6 +16,9 @@ persistency:
 
     ground_detection_distance: 2.0 # [m]
 
+    # how high is the fcu fram above the ground when sitting on the ground
+    robot_height: 0.3 # [m]
+
 global_map:
 
   # the publisher rate of the full map
