@@ -38,6 +38,7 @@
 #include <mrs_lib/transformer.h>
 #include <mrs_lib/subscribe_handler.h>
 #include <mrs_lib/mutex.h>
+#include <mrs_lib/scope_timer.h>
 
 #include <mrs_msgs/String.h>
 #include <mrs_msgs/ControlManagerDiagnostics.h>
@@ -188,8 +189,13 @@ private:
   bool        _global_map_compress_;
   std::string _map_path_;
 
-  double _local_map_distance_;
+  double _local_map_horizontal_distance_;
+  double _local_map_vertical_distance_;
   double _local_map_rate_;
+  double _local_map_max_computation_duty_cycle_;
+
+  double local_map_horizontal_offset_ = 0;
+  double local_map_vertical_offset_   = 0;
 
   bool   _unknown_rays_update_free_space_;
   double _unknown_rays_distance_;
@@ -204,7 +210,7 @@ private:
 
   bool translateMap(std::shared_ptr<OcTreeT>& octree, const double& x, const double& y, const double& z);
 
-  bool createLocalMap(const std::string frame_id, const double radius, std::shared_ptr<OcTreeT>& octree);
+  bool createLocalMap(const std::string frame_id, const double horizontal_distance, const double vertical_distance, std::shared_ptr<OcTreeT>& octree);
 
   inline static void updateMinKey(const octomap::OcTreeKey& in, octomap::OcTreeKey& min) {
     for (unsigned i = 0; i < 3; ++i)
@@ -263,8 +269,10 @@ void OctomapServer::onInit() {
   param_loader.loadParam("global_map/publish_binary", _global_map_publish_binary_);
 
   param_loader.loadParam("local_map/enabled", _local_map_enabled_);
-  param_loader.loadParam("local_map/distance", _local_map_distance_);
+  param_loader.loadParam("local_map/horizontal_distance", _local_map_horizontal_distance_);
+  param_loader.loadParam("local_map/vertical_distance", _local_map_vertical_distance_);
   param_loader.loadParam("local_map/rate", _local_map_rate_);
+  param_loader.loadParam("local_map/max_computation_duty_cycle", _local_map_max_computation_duty_cycle_);
   param_loader.loadParam("local_map/publish_full", _local_map_publish_full_);
   param_loader.loadParam("local_map/publish_binary", _local_map_publish_binary_);
 
@@ -291,19 +299,6 @@ void OctomapServer::onInit() {
   if (!param_loader.loadedSuccessfully()) {
     ROS_ERROR("[%s]: Could not load all non-optional parameters. Shutting down.", ros::this_node::getName().c_str());
     ros::requestShutdown();
-  }
-
-  //}
-
-  /* check params //{ */
-
-
-  if (_local_map_enabled_ && _local_map_distance_ < m_maxRange) {
-    std::string msg = std::string("You enabled using only the local map. ") +
-                      "However, the local distance for the map is lower than the maximal sensor range. " +
-                      "Defaulting the local distance for the map to the maximal sensor range.";
-    ROS_WARN("[%s]: %s", ros::this_node::getName().c_str(), msg.c_str());
-    _local_map_distance_ = m_maxRange;
   }
 
   //}
@@ -415,6 +410,8 @@ void OctomapServer::onInit() {
   }
 
   //}
+
+  avg_time_local_map_processing_ = (1.0 / _local_map_rate_) * _local_map_max_computation_duty_cycle_;
 
   is_initialized_ = true;
 
@@ -745,7 +742,34 @@ void OctomapServer::timerLocalMap([[maybe_unused]] const ros::TimerEvent& evt) {
 
   std::scoped_lock lock(mutex_octree_local_);
 
-  bool success = createLocalMap(_robot_frame_, _local_map_distance_, octree_local_);
+  double duty_factor = avg_time_local_map_processing_ / (_local_map_max_computation_duty_cycle_ * (1.0 / _local_map_rate_));
+
+  if (duty_factor >= 1.0) {
+    local_map_horizontal_offset_ -= 0.5;
+    local_map_vertical_offset_ -= 0.25;
+    ROS_WARN_THROTTLE(1.0, "[OctomapServer]: decreasing local map size");
+  } else if (duty_factor <= 0.5) {
+    local_map_horizontal_offset_ += 0.5;
+    local_map_vertical_offset_ += 0.25;
+    ROS_WARN_THROTTLE(1.0, "[OctomapServer]: increasing local map size");
+  } else {
+    ROS_INFO("[OctomapServer]: local map duty cycle satisfied");
+  }
+
+  double horizontal_distance = _local_map_horizontal_distance_ + local_map_horizontal_offset_;
+  double vertical_distance   = _local_map_vertical_distance_ + local_map_vertical_offset_;
+
+  if (horizontal_distance < 10) {
+    vertical_distance = 10;
+    ROS_ERROR_THROTTLE(1.0, "[OctomapServer]: saturating local map size to 10, your computer is probably not very powerfull");
+  }
+
+  if (vertical_distance < 5) {
+    vertical_distance = 5;
+    ROS_ERROR_THROTTLE(1.0, "[OctomapServer]: saturating local map vertical size to 5, your computer is probably not very powerfull");
+  }
+
+  bool success = createLocalMap(_robot_frame_, horizontal_distance, vertical_distance, octree_local_);
 
   if (!success) {
     ROS_WARN_THROTTLE(1.0, "[OctomapServer]: failed to create the local map");
@@ -1071,9 +1095,9 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
   // mark free cells only if not seen occupied in this cloud
   for (octomap::KeySet::iterator it = free_cells.begin(), end = free_cells.end(); it != end; ++it) {
-    if (occupied_cells.find(*it) == occupied_cells.end()) {
-      octree_->updateNode(*it, false);
-    }
+    /* if (occupied_cells.find(*it) == occupied_cells.end()) { */
+    octree_->updateNode(*it, false);
+    /* } */
   }
 
   // now mark all occupied cells:
@@ -1240,6 +1264,8 @@ bool OctomapServer::saveToFile(const std::string& filename) {
 
 bool OctomapServer::copyInsideBBX(std::shared_ptr<OcTreeT>& from, std::shared_ptr<OcTreeT>& to, const octomap::point3d& p_min, const octomap::point3d& p_max) {
 
+  mrs_lib::ScopeTimer scope_timer("copyInsideBBX", ros::Duration(1.0));
+
   octomap::OcTreeKey minKey, maxKey;
 
   if (!from->coordToKeyChecked(p_min, minKey) || !from->coordToKeyChecked(p_max, maxKey)) {
@@ -1382,7 +1408,8 @@ bool OctomapServer::translateMap(std::shared_ptr<OcTreeT>& octree, const double&
 
 /* createLocalMap() //{ */
 
-bool OctomapServer::createLocalMap(const std::string frame_id, const double radius, std::shared_ptr<OcTreeT>& octree) {
+bool OctomapServer::createLocalMap(const std::string frame_id, const double horizontal_distance, const double vertical_distance,
+                                   std::shared_ptr<OcTreeT>& octree) {
 
   ros::Time time_start = ros::Time::now();
 
@@ -1408,9 +1435,9 @@ bool OctomapServer::createLocalMap(const std::string frame_id, const double radi
     octree->clear();
 
     const octomap::point3d p_min =
-        octomap::point3d(float(robot_x - _local_map_distance_), float(robot_y - _local_map_distance_), float(robot_z - _local_map_distance_));
+        octomap::point3d(float(robot_x - horizontal_distance), float(robot_y - horizontal_distance), float(robot_z - vertical_distance));
     const octomap::point3d p_max =
-        octomap::point3d(float(robot_x + _local_map_distance_), float(robot_y + _local_map_distance_), float(robot_z + _local_map_distance_));
+        octomap::point3d(float(robot_x + horizontal_distance), float(robot_y + horizontal_distance), float(robot_z + vertical_distance));
 
     success = copyInsideBBX(octree_, octree, p_min, p_max);
   }
@@ -1422,10 +1449,14 @@ bool OctomapServer::createLocalMap(const std::string frame_id, const double radi
 
     double exec_duration = (time_end - time_start).toSec();
 
-    double coef                    = 0.95;
+    double coef                    = 0.00;
     avg_time_local_map_processing_ = coef * avg_time_local_map_processing_ + (1.0 - coef) * exec_duration;
 
-    ROS_INFO_THROTTLE(5.0, "[OctomapServer]: avg local map creation time = %.3f sec", avg_time_local_map_processing_);
+    if (avg_time_local_map_processing_ > ((1.0 / _local_map_rate_) * _local_map_max_computation_duty_cycle_)) {
+      ROS_ERROR_THROTTLE(5.0, "[OctomapServer]: avg local map creation time = %.3f sec", avg_time_local_map_processing_);
+    } else {
+      ROS_WARN_THROTTLE(5.0, "[OctomapServer]: avg local map creation time = %.3f sec", avg_time_local_map_processing_);
+    }
   }
 
   return success;

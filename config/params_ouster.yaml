@@ -17,7 +17,7 @@ persistency:
     ground_detection_distance: 2.0 # [m]
 
     # how high is the fcu fram above the ground when sitting on the ground
-    robot_height: 0.3 # [m]
+    robot_height: 1.0 # [m]
 
 global_map:
 
@@ -36,10 +36,13 @@ local_map:
   enabled: true
 
   # the bounding box distance of the local map
-  distance: 50.0
+  horizontal_distance: 50.0
+  vertical_distance: 25.0
 
   # the publisher rate of the local map
   rate: 10.0 # [Hz]
+
+  max_computation_duty_cycle: 0.33
 
   publish_full: true # should publish map with full probabilities?
   publish_binary: false # should publish map with binary occupancy?
