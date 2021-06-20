@@ -70,6 +70,16 @@ struct xyz_lut_t
   vec3s_t offsets;     // a matrix of offset vectors
 };
 
+#ifdef COLOR_OCTOMAP_SERVER
+using PCLPoint      = pcl::PointXYZRGB;
+using PCLPointCloud = pcl::PointCloud<PCLPoint>;
+using OcTreeT       = octomap::ColorOcTree;
+#else
+using PCLPoint      = pcl::PointXYZ;
+using PCLPointCloud = pcl::PointCloud<PCLPoint>;
+using OcTreeT       = octomap::OcTree;
+#endif
+
 //}
 
 /* class OctomapServer //{ */
@@ -77,16 +87,6 @@ struct xyz_lut_t
 class OctomapServer : public nodelet::Nodelet {
 
 public:
-#ifdef COLOR_OCTOMAP_SERVER
-  using PCLPoint      = pcl::PointXYZRGB;
-  using PCLPointCloud = pcl::PointCloud<PCLPoint>;
-  using OcTreeT       = octomap::ColorOcTree;
-#else
-  using PCLPoint      = pcl::PointXYZ;
-  using PCLPointCloud = pcl::PointCloud<PCLPoint>;
-  using OcTreeT       = octomap::OcTree;
-#endif
-
   virtual void onInit();
 
   bool callbackLoadMap(mrs_msgs::String::Request& req, [[maybe_unused]] mrs_msgs::String::Response& resp);
@@ -94,7 +94,7 @@ public:
 
   bool callbackResetMap(std_srvs::Empty::Request& req, std_srvs::Empty::Response& resp);
 
-  void callbackPointCloud2(mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>& wrp);
+  void callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>& wrp);
   void callbackLaserScan(mrs_lib::SubscribeHandler<sensor_msgs::LaserScan>& wrp);
   bool loadFromFile(const std::string& filename);
   bool saveToFile(const std::string& filename);
@@ -107,7 +107,7 @@ private:
 
   mrs_lib::SubscribeHandler<mrs_msgs::ControlManagerDiagnostics> sh_control_manager_diag_;
   mrs_lib::SubscribeHandler<mrs_msgs::Float64Stamped>            sh_height_;
-  mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>            sh_point_cloud_2_;
+  mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>            sh_3dlaser_pc2_;
   mrs_lib::SubscribeHandler<sensor_msgs::LaserScan>              sh_laser_scan_;
 
   // | ----------------------- publishers ----------------------- |
@@ -173,8 +173,8 @@ private:
   double     avg_time_cloud_insertion_ = 0;
   std::mutex mutex_avg_time_cloud_insertion_;
 
-  double     avg_time_local_map_processing_ = 0;
-  std::mutex mutex_avg_time_local_map_processing_;
+  double     time_last_local_map_processing_ = 0;
+  std::mutex mutex_time_local_map_processing_;
 
   octomap::KeyRay    m_keyRay;  // temp storage for ray casting
   octomap::OcTreeKey m_updateBBXMin;
@@ -380,7 +380,7 @@ void OctomapServer::onInit() {
 
   sh_control_manager_diag_ = mrs_lib::SubscribeHandler<mrs_msgs::ControlManagerDiagnostics>(shopts, "control_manager_diagnostics_in");
   sh_height_               = mrs_lib::SubscribeHandler<mrs_msgs::Float64Stamped>(shopts, "height_in");
-  sh_point_cloud_2_        = mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>(shopts, "point_cloud_in", &OctomapServer::callbackPointCloud2, this);
+  sh_3dlaser_pc2_          = mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>(shopts, "point_cloud_in", &OctomapServer::callback3dLidarCloud2, this);
   sh_laser_scan_           = mrs_lib::SubscribeHandler<sensor_msgs::LaserScan>(shopts, "laser_scan_in", &OctomapServer::callbackLaserScan, this);
 
   //}
@@ -411,7 +411,7 @@ void OctomapServer::onInit() {
 
   //}
 
-  avg_time_local_map_processing_ = (1.0 / _local_map_rate_) * _local_map_max_computation_duty_cycle_;
+  time_last_local_map_processing_ = (1.0 / _local_map_rate_) * _local_map_max_computation_duty_cycle_;
 
   is_initialized_ = true;
 
@@ -496,7 +496,7 @@ void OctomapServer::callbackLaserScan(mrs_lib::SubscribeHandler<sensor_msgs::Las
 
 /* insertCloudCallback() //{ */
 
-void OctomapServer::callbackPointCloud2(mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>& wrp) {
+void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>& wrp) {
 
   if (!is_initialized_) {
     return;
@@ -742,7 +742,9 @@ void OctomapServer::timerLocalMap([[maybe_unused]] const ros::TimerEvent& evt) {
 
   std::scoped_lock lock(mutex_octree_local_);
 
-  double duty_factor = avg_time_local_map_processing_ / (_local_map_max_computation_duty_cycle_ * (1.0 / _local_map_rate_));
+  auto time_local_map_processing = mrs_lib::get_mutexed(mutex_time_local_map_processing_, time_last_local_map_processing_);
+
+  double duty_factor = time_last_local_map_processing_ / (_local_map_max_computation_duty_cycle_ * (1.0 / _local_map_rate_));
 
   if (duty_factor >= 1.0) {
 
@@ -761,7 +763,6 @@ void OctomapServer::timerLocalMap([[maybe_unused]] const ros::TimerEvent& evt) {
     if (local_map_vertical_offset_ >= 0) {
       local_map_vertical_offset_ = 0;
     }
-
   }
 
   double horizontal_distance = _local_map_horizontal_distance_ + local_map_horizontal_offset_;
@@ -1272,8 +1273,6 @@ bool OctomapServer::saveToFile(const std::string& filename) {
 
 bool OctomapServer::copyInsideBBX(std::shared_ptr<OcTreeT>& from, std::shared_ptr<OcTreeT>& to, const octomap::point3d& p_min, const octomap::point3d& p_max) {
 
-  mrs_lib::ScopeTimer scope_timer("copyInsideBBX", ros::Duration(1.0));
-
   octomap::OcTreeKey minKey, maxKey;
 
   if (!from->coordToKeyChecked(p_min, minKey) || !from->coordToKeyChecked(p_max, maxKey)) {
@@ -1290,14 +1289,10 @@ bool OctomapServer::copyInsideBBX(std::shared_ptr<OcTreeT>& from, std::shared_pt
 
   for (OcTreeT::leaf_bbx_iterator it = from->begin_leafs_bbx(p_min, p_max), end = from->end_leafs_bbx(); it != end; ++it) {
 
-    /* auto coords = it.getCoordinate(); */
-    /* octomap::OcTreeKey k = to->coordToKey(coords); */
-
     to->setNodeValue(it.getKey(), it->getValue());
   }
 
-  /* from->prune(); */
-  /* to->prune(); */
+  to->prune();
 
   return true;
 }
@@ -1419,6 +1414,8 @@ bool OctomapServer::translateMap(std::shared_ptr<OcTreeT>& octree, const double&
 bool OctomapServer::createLocalMap(const std::string frame_id, const double horizontal_distance, const double vertical_distance,
                                    std::shared_ptr<OcTreeT>& octree) {
 
+  std::scoped_lock lock(mutex_octree_);
+
   ros::Time time_start = ros::Time::now();
 
   auto res = transformer_.getTransform(frame_id, _world_frame_);
@@ -1436,34 +1433,32 @@ bool OctomapServer::createLocalMap(const std::string frame_id, const double hori
 
   bool success = true;
 
-  // copy the maps
+  // clear the old local map
+  octree->clear();
+
+  const octomap::point3d p_min =
+      octomap::point3d(float(robot_x - horizontal_distance), float(robot_y - horizontal_distance), float(robot_z - vertical_distance));
+  const octomap::point3d p_max =
+      octomap::point3d(float(robot_x + horizontal_distance), float(robot_y + horizontal_distance), float(robot_z + vertical_distance));
+
+  success = copyInsideBBX(octree_, octree, p_min, p_max);
+
+  octree->setProbHit(octree->getProbHit());
+  octree->setProbMiss(octree->getProbMiss());
+  octree->setClampingThresMin(octree->getClampingThresMinLog());
+  octree->setClampingThresMax(octree->getClampingThresMaxLog());
+
   {
-    std::scoped_lock lock(mutex_octree_);
-
-    octree->clear();
-
-    const octomap::point3d p_min =
-        octomap::point3d(float(robot_x - horizontal_distance), float(robot_y - horizontal_distance), float(robot_z - vertical_distance));
-    const octomap::point3d p_max =
-        octomap::point3d(float(robot_x + horizontal_distance), float(robot_y + horizontal_distance), float(robot_z + vertical_distance));
-
-    success = copyInsideBBX(octree_, octree, p_min, p_max);
-  }
-
-  {
-    std::scoped_lock lock(mutex_avg_time_local_map_processing_);
+    std::scoped_lock lock(mutex_time_local_map_processing_);
 
     ros::Time time_end = ros::Time::now();
 
-    double exec_duration = (time_end - time_start).toSec();
+    time_last_local_map_processing_ = (time_end - time_start).toSec();
 
-    double coef                    = 0.00;
-    avg_time_local_map_processing_ = coef * avg_time_local_map_processing_ + (1.0 - coef) * exec_duration;
-
-    if (avg_time_local_map_processing_ > ((1.0 / _local_map_rate_) * _local_map_max_computation_duty_cycle_)) {
-      ROS_ERROR_THROTTLE(5.0, "[OctomapServer]: avg local map creation time = %.3f sec", avg_time_local_map_processing_);
+    if (time_last_local_map_processing_ > ((1.0 / _local_map_rate_) * _local_map_max_computation_duty_cycle_)) {
+      ROS_ERROR_THROTTLE(5.0, "[OctomapServer]: local map creation time = %.3f sec", time_last_local_map_processing_);
     } else {
-      ROS_WARN_THROTTLE(5.0, "[OctomapServer]: avg local map creation time = %.3f sec", avg_time_local_map_processing_);
+      ROS_WARN_THROTTLE(5.0, "[OctomapServer]: local map creation time = %.3f sec", time_last_local_map_processing_);
     }
   }
 
