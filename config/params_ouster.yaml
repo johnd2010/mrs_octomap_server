@@ -2,7 +2,7 @@ resolution: 1.00 # [m]
 
 persistency:
 
-  enabled: true
+  enabled: false
 
   map_name: "default"
 
@@ -12,7 +12,7 @@ persistency:
   # automatically aligns altitude after start
   align_altitude:
 
-    enabled: true
+    enabled: false
 
     ground_detection_distance: 2.0 # [m]
 
@@ -50,6 +50,7 @@ local_map:
 unknown_rays:
 
   update_free_space: true
+  clear_occupied: false
   ray_distance: 15.0
 
 # for point cloud raycasting
@@ -62,7 +63,7 @@ sensor_params_3d:
 
 sensor_model:
 
-  max_range: 40.0
+  max_range: 20.0
 
   hit: 0.95  # [0, 1]
   miss: 0.45 # [0, 1]

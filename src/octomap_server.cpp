@@ -198,6 +198,7 @@ private:
   double local_map_vertical_offset_   = 0;
 
   bool   _unknown_rays_update_free_space_;
+  bool   _unknown_rays_clear_occupied_;
   double _unknown_rays_distance_;
 
   laser_geometry::LaserProjection projector_;
@@ -283,6 +284,7 @@ void OctomapServer::onInit() {
   param_loader.loadParam("map_path", _map_path_);
 
   param_loader.loadParam("unknown_rays/update_free_space", _unknown_rays_update_free_space_);
+  param_loader.loadParam("unknown_rays/clear_occupied", _unknown_rays_clear_occupied_);
   param_loader.loadParam("unknown_rays/ray_distance", _unknown_rays_distance_);
 
   param_loader.loadParam("sensor_params_3d/enabled", m_sensor_3d_params_enabled);
@@ -1024,7 +1026,7 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
     ROS_ERROR_STREAM("Could not generate Key for origin " << sensorOrigin);
   }
 
-  const float free_space_ray_len = 15.0;
+  const float free_space_ray_len = float(_unknown_rays_distance_);
 
   // instead of direct scan insertion, compute probabilistic update
   octomap::KeySet free_cells, occupied_cells;
@@ -1082,17 +1084,21 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
           break;
         }
 
-        // check if the cell is occupied in a map
-        auto node = octree_->search(*it2);
-        if (node && octree_->isNodeOccupied(node)) {
+        if (!_unknown_rays_clear_occupied_) {
 
-          if (it2 == keyRay.begin()) {
-            alterantive_ray_end = keyRay.begin();  // special case
-          } else {
-            alterantive_ray_end = it2 - 1;
+          // check if the cell is occupied in the map
+          auto node = octree_->search(*it2);
+          
+          if (node && octree_->isNodeOccupied(node)) {
+          
+            if (it2 == keyRay.begin()) {
+              alterantive_ray_end = keyRay.begin();  // special case
+            } else {
+              alterantive_ray_end = it2 - 1;
+            }
+          
+            break;
           }
-
-          break;
         }
       }
 
@@ -1105,7 +1111,7 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
   // mark free cells only if not seen occupied in this cloud
   for (octomap::KeySet::iterator it = free_cells.begin(), end = free_cells.end(); it != end; ++it) {
     /* if (occupied_cells.find(*it) == occupied_cells.end()) { */
-    octree_->updateNode(*it, false);
+      octree_->updateNode(*it, false);
     /* } */
   }
 
