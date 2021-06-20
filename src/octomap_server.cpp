@@ -745,15 +745,23 @@ void OctomapServer::timerLocalMap([[maybe_unused]] const ros::TimerEvent& evt) {
   double duty_factor = avg_time_local_map_processing_ / (_local_map_max_computation_duty_cycle_ * (1.0 / _local_map_rate_));
 
   if (duty_factor >= 1.0) {
+
     local_map_horizontal_offset_ -= 0.5;
     local_map_vertical_offset_ -= 0.25;
-    ROS_WARN_THROTTLE(1.0, "[OctomapServer]: decreasing local map size");
+
   } else if (duty_factor <= 0.5) {
+
     local_map_horizontal_offset_ += 0.5;
     local_map_vertical_offset_ += 0.25;
-    ROS_WARN_THROTTLE(1.0, "[OctomapServer]: increasing local map size");
-  } else {
-    ROS_INFO("[OctomapServer]: local map duty cycle satisfied");
+
+    if (local_map_vertical_offset_ >= 0) {
+      local_map_horizontal_offset_ = 0;
+    }
+
+    if (local_map_vertical_offset_ >= 0) {
+      local_map_vertical_offset_ = 0;
+    }
+
   }
 
   double horizontal_distance = _local_map_horizontal_distance_ + local_map_horizontal_offset_;
@@ -980,7 +988,7 @@ void OctomapServer::timerAltitudeAlignment([[maybe_unused]] const ros::TimerEven
   if (align_using_height) {
     ground_z_should_be = robot_z - sh_height_.getMsg()->value;
   } else {
-    ground_z_should_be = robot_z - _robot_height_;
+    ground_z_should_be = robot_z - _robot_height_ - 0.5 * octree_->getResolution();
   }
 
   double offset = ground_z_should_be - ground_z.value();
