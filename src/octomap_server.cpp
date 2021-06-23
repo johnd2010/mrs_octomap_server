@@ -73,11 +73,11 @@ struct xyz_lut_t
 #ifdef COLOR_OCTOMAP_SERVER
 using PCLPoint      = pcl::PointXYZRGB;
 using PCLPointCloud = pcl::PointCloud<PCLPoint>;
-using OcTreeT       = octomap::ColorOcTree;
+using OcTree_t      = octomap::ColorOcTree;
 #else
 using PCLPoint      = pcl::PointXYZ;
 using PCLPointCloud = pcl::PointCloud<PCLPoint>;
-using OcTreeT       = octomap::OcTree;
+using OcTree_t      = octomap::OcTree;
 #endif
 
 //}
@@ -163,12 +163,12 @@ private:
 
   mrs_lib::Transformer transformer_;
 
-  std::shared_ptr<OcTreeT> octree_;
-  std::mutex               mutex_octree_;
-  std::atomic<bool>        octree_initialized_;
+  std::shared_ptr<OcTree_t> octree_;
+  std::mutex                mutex_octree_;
+  std::atomic<bool>         octree_initialized_;
 
-  std::shared_ptr<OcTreeT> octree_local_;
-  std::mutex               mutex_octree_local_;
+  std::shared_ptr<OcTree_t> octree_local_;
+  std::mutex                mutex_octree_local_;
 
   double     avg_time_cloud_insertion_ = 0;
   std::mutex mutex_avg_time_cloud_insertion_;
@@ -203,15 +203,22 @@ private:
 
   laser_geometry::LaserProjection projector_;
 
-  bool copyInsideBBX(std::shared_ptr<OcTreeT>& from, std::shared_ptr<OcTreeT>& to, const octomap::point3d& p_min, const octomap::point3d& p_max);
+  bool copyInsideBBX(std::shared_ptr<OcTree_t>& from, std::shared_ptr<OcTree_t>& to, const octomap::point3d& p_min, const octomap::point3d& p_max);
 
-  void expandNodeRecursive(std::shared_ptr<OcTreeT>& octree, octomap::OcTreeNode* node, const unsigned int node_depth);
+  bool copyInsideBBX2(std::shared_ptr<OcTree_t>& from, std::shared_ptr<OcTree_t>& to, const octomap::point3d& p_min, const octomap::point3d& p_max);
 
-  std::optional<double> getGroundZ(std::shared_ptr<OcTreeT>& octree, const double& x, const double& y);
+  octomap::OcTreeNode* touchNodeRecurs(std::shared_ptr<OcTree_t>& octree, octomap::OcTreeNode* node, const octomap::OcTreeKey& key, unsigned int depth,
+                                       unsigned int max_depth);
 
-  bool translateMap(std::shared_ptr<OcTreeT>& octree, const double& x, const double& y, const double& z);
+  octomap::OcTreeNode* touchNode(std::shared_ptr<OcTree_t>& octree, const octomap::OcTreeKey& key, unsigned int target_depth);
 
-  bool createLocalMap(const std::string frame_id, const double horizontal_distance, const double vertical_distance, std::shared_ptr<OcTreeT>& octree);
+  void expandNodeRecursive(std::shared_ptr<OcTree_t>& octree, octomap::OcTreeNode* node, const unsigned int node_depth);
+
+  std::optional<double> getGroundZ(std::shared_ptr<OcTree_t>& octree, const double& x, const double& y);
+
+  bool translateMap(std::shared_ptr<OcTree_t>& octree, const double& x, const double& y, const double& z);
+
+  bool createLocalMap(const std::string frame_id, const double horizontal_distance, const double vertical_distance, std::shared_ptr<OcTree_t>& octree);
 
   inline static void updateMinKey(const octomap::OcTreeKey& in, octomap::OcTreeKey& min) {
     for (unsigned i = 0; i < 3; ++i)
@@ -316,13 +323,13 @@ void OctomapServer::onInit() {
 
   /* initialize octomap object & params //{ */
 
-  octree_ = std::make_shared<OcTreeT>(octree_resolution_);
+  octree_ = std::make_shared<OcTree_t>(octree_resolution_);
   octree_->setProbHit(_probHit_);
   octree_->setProbMiss(_probMiss_);
   octree_->setClampingThresMin(_thresMin_);
   octree_->setClampingThresMax(_thresMax_);
 
-  octree_local_ = std::make_shared<OcTreeT>(octree_resolution_);
+  octree_local_ = std::make_shared<OcTree_t>(octree_resolution_);
   octree_local_->setProbHit(_probHit_);
   octree_local_->setProbMiss(_probMiss_);
   octree_local_->setClampingThresMin(_thresMin_);
@@ -780,6 +787,8 @@ void OctomapServer::timerLocalMap([[maybe_unused]] const ros::TimerEvent& evt) {
     ROS_ERROR_THROTTLE(1.0, "[OctomapServer]: saturating local map vertical size to 5, your computer is probably not very powerfull");
   }
 
+  ROS_INFO_THROTTLE(5.0, "[OctomapServer]: local map size: hor %d, ver %d", int(horizontal_distance), int(vertical_distance));
+
   bool success = createLocalMap(_robot_frame_, horizontal_distance, vertical_distance, octree_local_);
 
   if (!success) {
@@ -1088,15 +1097,15 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
           // check if the cell is occupied in the map
           auto node = octree_->search(*it2);
-          
+
           if (node && octree_->isNodeOccupied(node)) {
-          
+
             if (it2 == keyRay.begin()) {
               alterantive_ray_end = keyRay.begin();  // special case
             } else {
               alterantive_ray_end = it2 - 1;
             }
-          
+
             break;
           }
         }
@@ -1111,7 +1120,7 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
   // mark free cells only if not seen occupied in this cloud
   for (octomap::KeySet::iterator it = free_cells.begin(), end = free_cells.end(); it != end; ++it) {
     /* if (occupied_cells.find(*it) == occupied_cells.end()) { */
-      octree_->updateNode(*it, false);
+    octree_->updateNode(*it, false);
     /* } */
   }
 
@@ -1204,8 +1213,8 @@ bool OctomapServer::loadFromFile(const std::string& filename) {
         return false;
       }
 
-      OcTreeT* octree = dynamic_cast<OcTreeT*>(tree);
-      octree_         = std::shared_ptr<OcTreeT>(octree);
+      OcTree_t* octree = dynamic_cast<OcTree_t*>(tree);
+      octree_          = std::shared_ptr<OcTree_t>(octree);
 
       if (!octree_) {
         ROS_ERROR("[OctomapServer]: could not read OcTree file");
@@ -1277,7 +1286,8 @@ bool OctomapServer::saveToFile(const std::string& filename) {
 
 /* copyInsideBBX() //{ */
 
-bool OctomapServer::copyInsideBBX(std::shared_ptr<OcTreeT>& from, std::shared_ptr<OcTreeT>& to, const octomap::point3d& p_min, const octomap::point3d& p_max) {
+bool OctomapServer::copyInsideBBX(std::shared_ptr<OcTree_t>& from, std::shared_ptr<OcTree_t>& to, const octomap::point3d& p_min,
+                                  const octomap::point3d& p_max) {
 
   octomap::OcTreeKey minKey, maxKey;
 
@@ -1285,7 +1295,7 @@ bool OctomapServer::copyInsideBBX(std::shared_ptr<OcTreeT>& from, std::shared_pt
     return false;
   }
 
-  for (OcTreeT::leaf_bbx_iterator it = from->begin_leafs_bbx(p_min, p_max), end = from->end_leafs_bbx(); it != end; ++it) {
+  for (OcTree_t::leaf_bbx_iterator it = from->begin_leafs_bbx(p_min, p_max), end = from->end_leafs_bbx(); it != end; ++it) {
 
     octomap::OcTreeKey   k    = it.getKey();
     octomap::OcTreeNode* node = from->search(k);
@@ -1293,7 +1303,7 @@ bool OctomapServer::copyInsideBBX(std::shared_ptr<OcTreeT>& from, std::shared_pt
     expandNodeRecursive(from, node, it.getDepth());
   }
 
-  for (OcTreeT::leaf_bbx_iterator it = from->begin_leafs_bbx(p_min, p_max), end = from->end_leafs_bbx(); it != end; ++it) {
+  for (OcTree_t::leaf_bbx_iterator it = from->begin_leafs_bbx(p_min, p_max), end = from->end_leafs_bbx(); it != end; ++it) {
 
     to->setNodeValue(it.getKey(), it->getValue());
   }
@@ -1305,9 +1315,85 @@ bool OctomapServer::copyInsideBBX(std::shared_ptr<OcTreeT>& from, std::shared_pt
 
 //}
 
+/* copyInsideBBX2() //{ */
+
+bool OctomapServer::copyInsideBBX2(std::shared_ptr<OcTree_t>& from, std::shared_ptr<OcTree_t>& to, const octomap::point3d& p_min,
+                                   const octomap::point3d& p_max) {
+
+  octomap::OcTreeKey minKey, maxKey;
+
+  if (!from->coordToKeyChecked(p_min, minKey) || !from->coordToKeyChecked(p_max, maxKey)) {
+    return false;
+  }
+
+  octomap::OcTreeNode* root = to->getRoot();
+
+  bool got_root = root ? true : false;
+
+  if (!got_root) {
+    octomap::OcTreeKey key = to->coordToKey(p_min.x() - to->getResolution() * 2.0, p_min.y(), p_min.z(), to->getTreeDepth());
+    to->setNodeValue(key, 1.0);
+  }
+
+  for (OcTree_t::leaf_bbx_iterator it = from->begin_leafs_bbx(p_min, p_max), end = from->end_leafs_bbx(); it != end; ++it) {
+
+    octomap::OcTreeKey   k    = it.getKey();
+    octomap::OcTreeNode* node = touchNode(to, k, it.getDepth());
+    node->setValue(it->getValue());
+  }
+
+  if (!got_root) {
+    octomap::OcTreeKey key = to->coordToKey(p_min.x() - to->getResolution() * 2.0, p_min.y(), p_min.z(), to->getTreeDepth());
+    to->deleteNode(key, to->getTreeDepth());
+  }
+
+  return true;
+}
+
+//}
+
+/* touchNode() //{ */
+
+octomap::OcTreeNode* OctomapServer::touchNode(std::shared_ptr<OcTree_t>& octree, const octomap::OcTreeKey& key, unsigned int target_depth = 0) {
+
+  return touchNodeRecurs(octree, octree->getRoot(), key, 0, target_depth);
+}
+
+//}
+
+/* touchNodeRecurs() //{ */
+
+octomap::OcTreeNode* OctomapServer::touchNodeRecurs(std::shared_ptr<OcTree_t>& octree, octomap::OcTreeNode* node, const octomap::OcTreeKey& key,
+                                                    unsigned int depth, unsigned int max_depth = 0) {
+
+  assert(node);
+
+  // follow down to last level
+  if (depth < octree->getTreeDepth() && (max_depth == 0 || depth < max_depth)) {
+
+    unsigned int pos = octomap::computeChildIdx(key, int(octree->getTreeDepth() - depth - 1));
+
+    /* ROS_INFO("pos: %d", pos); */
+    if (!octree->nodeChildExists(node, pos)) {
+
+      // not a pruned node, create requested child
+      octree->createNodeChild(node, pos);
+    }
+
+    return touchNodeRecurs(octree, octree->getNodeChild(node, pos), key, depth + 1, max_depth);
+  }
+
+  // at last level, update node, end of recursion
+  else {
+    return node;
+  }
+}
+
+//}
+
 /* expandNodeRecursive() //{ */
 
-void OctomapServer::expandNodeRecursive(std::shared_ptr<OcTreeT>& octree, octomap::OcTreeNode* node, const unsigned int node_depth) {
+void OctomapServer::expandNodeRecursive(std::shared_ptr<OcTree_t>& octree, octomap::OcTreeNode* node, const unsigned int node_depth) {
 
   if (node_depth < octree->getTreeDepth()) {
 
@@ -1328,12 +1414,12 @@ void OctomapServer::expandNodeRecursive(std::shared_ptr<OcTreeT>& octree, octoma
 
 /* getGroundZ() //{ */
 
-std::optional<double> OctomapServer::getGroundZ(std::shared_ptr<OcTreeT>& octree, const double& x, const double& y) {
+std::optional<double> OctomapServer::getGroundZ(std::shared_ptr<OcTree_t>& octree, const double& x, const double& y) {
 
   octomap::point3d p_min(float(x - _persistency_align_altitude_distance_), float(y - _persistency_align_altitude_distance_), -10000);
   octomap::point3d p_max(float(x + _persistency_align_altitude_distance_), float(y + _persistency_align_altitude_distance_), 10000);
 
-  for (OcTreeT::leaf_bbx_iterator it = octree->begin_leafs_bbx(p_min, p_max), end = octree->end_leafs_bbx(); it != end; ++it) {
+  for (OcTree_t::leaf_bbx_iterator it = octree->begin_leafs_bbx(p_min, p_max), end = octree->end_leafs_bbx(); it != end; ++it) {
 
     octomap::OcTreeKey   k    = it.getKey();
     octomap::OcTreeNode* node = octree->search(k);
@@ -1343,7 +1429,7 @@ std::optional<double> OctomapServer::getGroundZ(std::shared_ptr<OcTreeT>& octree
 
   std::vector<octomap::point3d> occupied_points;
 
-  for (OcTreeT::leaf_bbx_iterator it = octree->begin_leafs_bbx(p_min, p_max), end = octree->end_leafs_bbx(); it != end; ++it) {
+  for (OcTree_t::leaf_bbx_iterator it = octree->begin_leafs_bbx(p_min, p_max), end = octree->end_leafs_bbx(); it != end; ++it) {
 
     if (octree->isNodeOccupied(*it)) {
 
@@ -1379,18 +1465,18 @@ std::optional<double> OctomapServer::getGroundZ(std::shared_ptr<OcTreeT>& octree
 
 /* translateMap() //{ */
 
-bool OctomapServer::translateMap(std::shared_ptr<OcTreeT>& octree, const double& x, const double& y, const double& z) {
+bool OctomapServer::translateMap(std::shared_ptr<OcTree_t>& octree, const double& x, const double& y, const double& z) {
 
   octree->expand();
 
   // allocate the new future octree
-  std::shared_ptr<OcTreeT> octree_new = std::make_shared<OcTreeT>(octree_resolution_);
+  std::shared_ptr<OcTree_t> octree_new = std::make_shared<OcTree_t>(octree_resolution_);
   octree_new->setProbHit(_probHit_);
   octree_new->setProbMiss(_probMiss_);
   octree_new->setClampingThresMin(_thresMin_);
   octree_new->setClampingThresMax(_thresMax_);
 
-  for (OcTreeT::leaf_iterator it = octree->begin_leafs(), end = octree->end_leafs(); it != end; ++it) {
+  for (OcTree_t::leaf_iterator it = octree->begin_leafs(), end = octree->end_leafs(); it != end; ++it) {
 
     auto coords = it.getCoordinate();
 
@@ -1418,7 +1504,7 @@ bool OctomapServer::translateMap(std::shared_ptr<OcTreeT>& octree, const double&
 /* createLocalMap() //{ */
 
 bool OctomapServer::createLocalMap(const std::string frame_id, const double horizontal_distance, const double vertical_distance,
-                                   std::shared_ptr<OcTreeT>& octree) {
+                                   std::shared_ptr<OcTree_t>& octree) {
 
   std::scoped_lock lock(mutex_octree_);
 
@@ -1447,7 +1533,7 @@ bool OctomapServer::createLocalMap(const std::string frame_id, const double hori
   const octomap::point3d p_max =
       octomap::point3d(float(robot_x + horizontal_distance), float(robot_y + horizontal_distance), float(robot_z + vertical_distance));
 
-  success = copyInsideBBX(octree_, octree, p_min, p_max);
+  success = copyInsideBBX2(octree_, octree, p_min, p_max);
 
   octree->setProbHit(octree->getProbHit());
   octree->setProbMiss(octree->getProbMiss());
