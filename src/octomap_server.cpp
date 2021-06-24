@@ -1,5 +1,6 @@
 /* includes //{ */
 
+#include "octomap/OcTree.h"
 #include <ros/init.h>
 #include <ros/ros.h>
 #include <nodelet/nodelet.h>
@@ -1029,69 +1030,58 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
   std::scoped_lock lock(mutex_octree_);
 
-  const octomap::point3d sensorOrigin = octomap::pointTfToOctomap(sensorOriginTf);
+  const octomap::point3d sensor_origin = octomap::pointTfToOctomap(sensorOriginTf);
 
-  if (!octree_->coordToKeyChecked(sensorOrigin, m_updateBBXMin) || !octree_->coordToKeyChecked(sensorOrigin, m_updateBBXMax)) {
-    ROS_ERROR_STREAM("Could not generate Key for origin " << sensorOrigin);
+  if (!octree_->coordToKeyChecked(sensor_origin, m_updateBBXMin) || !octree_->coordToKeyChecked(sensor_origin, m_updateBBXMax)) {
+    ROS_ERROR_STREAM("Could not generate Key for origin " << sensor_origin);
   }
 
   const float free_space_ray_len = float(_unknown_rays_distance_);
 
-  // instead of direct scan insertion, compute probabilistic update
-  octomap::KeySet free_cells, occupied_cells;
-  const bool      free_space_bounded = free_space_ray_len > 0.0f;
+  octomap::KeySet occupied_cells;
+  octomap::KeySet free_cells;
+  octomap::KeySet free_ends;
+
+  const bool free_space_bounded = free_space_ray_len > 0.0f;
 
   // all points: free on ray, occupied on endpoint:
   for (PCLPointCloud::const_iterator it = cloud->begin(); it != cloud->end(); ++it) {
 
-    if (!(std::isfinite(it->x) && std::isfinite(it->y) && std::isfinite(it->z))) {
-      continue;
-    }
+    /* if (!(std::isfinite(it->x) && std::isfinite(it->y) && std::isfinite(it->z))) { */
+    /*   continue; */
+    /* } */
 
     octomap::point3d measured_point(it->x, it->y, it->z);
-    octomap::KeyRay  keyRay;
-    const float      point_distance = float((measured_point - sensorOrigin).norm());
+    const float      point_distance = float((measured_point - sensor_origin).norm());
 
     octomap::OcTreeKey key;
     if (octree_->coordToKeyChecked(measured_point, key)) {
-
       occupied_cells.insert(key);
-
-      /* updateMinKey(key, m_updateBBXMin); */
-      /* updateMaxKey(key, m_updateBBXMax); */
     }
 
     // move end point to distance min(free space ray len, current distance)
-    measured_point = sensorOrigin + (measured_point - sensorOrigin).normalize() * std::min(free_space_ray_len, point_distance);
+    measured_point = sensor_origin + (measured_point - sensor_origin).normalize() * std::min(free_space_ray_len, point_distance);
 
-    // free cells
-    if (octree_->computeRayKeys(sensorOrigin, measured_point, keyRay)) {
-      free_cells.insert(keyRay.begin(), keyRay.end());
-    }
+    octomap::OcTreeKey measured_key = octree_->coordToKey(measured_point);
+
+    free_ends.insert(measured_key);
   }
 
   for (PCLPointCloud::const_iterator it = free_vectors_cloud->begin(); it != free_vectors_cloud->end(); ++it) {
 
-    if (!(std::isfinite(it->x) && std::isfinite(it->y) && std::isfinite(it->z))) {
-      continue;
-    }
+    /* if (!(std::isfinite(it->x) && std::isfinite(it->y) && std::isfinite(it->z))) { */
+    /*   continue; */
+    /* } */
 
     octomap::point3d measured_point(it->x, it->y, it->z);
     octomap::KeyRay  keyRay;
 
     // check if the ray intersects a cell in the occupied list
-    if (octree_->computeRayKeys(sensorOrigin, measured_point, keyRay)) {
+    if (octree_->computeRayKeys(sensor_origin, measured_point, keyRay)) {
 
-      bool                      ray_is_cool         = true;
       octomap::KeyRay::iterator alterantive_ray_end = keyRay.end();
 
       for (octomap::KeyRay::iterator it2 = keyRay.begin(), end = keyRay.end(); it2 != end; ++it2) {
-
-        // check if the cell was spotted as occupied by a valid ray
-        if (occupied_cells.find(*it2) != occupied_cells.end()) {
-          ray_is_cool = false;
-          break;
-        }
 
         if (!_unknown_rays_clear_occupied_) {
 
@@ -1111,20 +1101,40 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
         }
       }
 
-      if (ray_is_cool) {
-        free_cells.insert(keyRay.begin(), alterantive_ray_end);
+      free_cells.insert(keyRay.begin(), alterantive_ray_end);
+    }
+  }
+
+  // FREE ENDS
+  for (octomap::KeySet::iterator it = free_ends.begin(), end = free_ends.end(); it != end; ++it) {
+
+    octomap::point3d coords = octree_->keyToCoord(*it);
+
+    octomap::KeyRay key_ray;
+    if (octree_->computeRayKeys(sensor_origin, coords, key_ray)) {
+
+      for (octomap::KeyRay::iterator it2 = key_ray.begin(), end = key_ray.end(); it2 != end; ++it2) {
+
+        if (occupied_cells.count(*it2)) {
+
+          octomap::KeyRay::iterator last_key = it2 != key_ray.begin() ? it2 - 1 : key_ray.begin();
+
+          free_cells.insert(key_ray.begin(), last_key);
+          break;
+
+        } else {
+          free_cells.insert(key_ray.begin(), key_ray.end());
+        }
       }
     }
   }
 
-  // mark free cells only if not seen occupied in this cloud
+  // FREE CELLS
   for (octomap::KeySet::iterator it = free_cells.begin(), end = free_cells.end(); it != end; ++it) {
-    /* if (occupied_cells.find(*it) == occupied_cells.end()) { */
     octree_->updateNode(*it, false);
-    /* } */
   }
 
-  // now mark all occupied cells:
+  // OCCUPIED CELLS
   for (octomap::KeySet::iterator it = occupied_cells.begin(), end = occupied_cells.end(); it != end; it++) {
     octree_->updateNode(*it, true);
   }

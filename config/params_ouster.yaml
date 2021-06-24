@@ -50,7 +50,7 @@ local_map:
 unknown_rays:
 
   update_free_space: true
-  clear_occupied: false
+  clear_occupied: false # beware, setting this to true is very dangerous
   ray_distance: 15.0
 
 # for point cloud raycasting
