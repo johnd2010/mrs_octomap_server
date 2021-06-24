@@ -1012,8 +1012,6 @@ void OctomapServer::timerAltitudeAlignment([[maybe_unused]] const ros::TimerEven
 
   translateMap(octree_, 0, 0, offset);
 
-  ROS_INFO("[OctomapServer]: octomap translated");
-
   octree_initialized_ = true;
 
   timer_altitude_alignment_.stop();
@@ -1477,14 +1475,16 @@ std::optional<double> OctomapServer::getGroundZ(std::shared_ptr<OcTree_t>& octre
 
 bool OctomapServer::translateMap(std::shared_ptr<OcTree_t>& octree, const double& x, const double& y, const double& z) {
 
+  ROS_INFO("[OctomapServer]: translating map by %.2f, %.2f, %.2f", x, y, z);
+
   octree->expand();
 
   // allocate the new future octree
   std::shared_ptr<OcTree_t> octree_new = std::make_shared<OcTree_t>(octree_resolution_);
-  octree_new->setProbHit(_probHit_);
-  octree_new->setProbMiss(_probMiss_);
-  octree_new->setClampingThresMin(_thresMin_);
-  octree_new->setClampingThresMax(_thresMax_);
+  octree_new->setProbHit(octree->getProbHit());
+  octree_new->setProbMiss(octree->getProbMiss());
+  octree_new->setClampingThresMin(octree->getClampingThresMin());
+  octree_new->setClampingThresMax(octree->getClampingThresMax());
 
   for (OcTree_t::leaf_iterator it = octree->begin_leafs(), end = octree->end_leafs(); it != end; ++it) {
 
@@ -1502,9 +1502,11 @@ bool OctomapServer::translateMap(std::shared_ptr<OcTree_t>& octree, const double
     octree_new->setNodeValue(new_key, value);
   }
 
-  octree_new->expand();
+  octree_new->prune();
 
   octree = octree_new;
+
+  ROS_INFO("[OctomapServer]: map translated");
 
   return true;
 }
