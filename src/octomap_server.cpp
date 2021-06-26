@@ -1045,9 +1045,9 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
   // all points: free on ray, occupied on endpoint:
   for (PCLPointCloud::const_iterator it = cloud->begin(); it != cloud->end(); ++it) {
 
-    /* if (!(std::isfinite(it->x) && std::isfinite(it->y) && std::isfinite(it->z))) { */
-    /*   continue; */
-    /* } */
+    if (!(std::isfinite(it->x) && std::isfinite(it->y) && std::isfinite(it->z))) {
+      continue;
+    }
 
     octomap::point3d measured_point(it->x, it->y, it->z);
     const float      point_distance = float((measured_point - sensor_origin).norm());
@@ -1067,9 +1067,9 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
   for (PCLPointCloud::const_iterator it = free_vectors_cloud->begin(); it != free_vectors_cloud->end(); ++it) {
 
-    /* if (!(std::isfinite(it->x) && std::isfinite(it->y) && std::isfinite(it->z))) { */
-    /*   continue; */
-    /* } */
+    if (!(std::isfinite(it->x) && std::isfinite(it->y) && std::isfinite(it->z))) {
+      continue;
+    }
 
     octomap::point3d measured_point(it->x, it->y, it->z);
     octomap::KeyRay  keyRay;
