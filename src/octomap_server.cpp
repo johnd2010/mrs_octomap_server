@@ -25,6 +25,7 @@
 #include <pcl/io/pcd_io.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/common/transforms.h>
+#include <pcl/filters/voxel_grid.h>
 
 #include <Eigen/Geometry>
 
@@ -157,6 +158,8 @@ private:
   bool _global_map_publish_full_;
   bool _global_map_publish_binary_;
 
+  bool _map_while_grounded_;
+
   double _local_map_size_;
   bool   _local_map_enabled_;
   bool   _local_map_publish_full_;
@@ -264,6 +267,8 @@ void OctomapServer::onInit() {
 
   param_loader.loadParam("simulation", _simulation_);
   param_loader.loadParam("uav_name", _uav_name_);
+
+  param_loader.loadParam("map_while_grounded", _map_while_grounded_);
 
   param_loader.loadParam("persistency/enabled", _persistency_enabled_);
   param_loader.loadParam("persistency/save_time", _persistency_save_time_);
@@ -444,6 +449,30 @@ void OctomapServer::callbackLaserScan(mrs_lib::SubscribeHandler<sensor_msgs::Las
     return;
   }
 
+  if (!_map_while_grounded_) {
+
+    if (!sh_control_manager_diag_.hasMsg()) {
+
+      ROS_WARN_THROTTLE(1.0, "[OctomapServer]: missing control manager diagnostics, can not integrate data!");
+      return;
+
+    } else {
+
+      ros::Time last_time = sh_control_manager_diag_.lastMsgTime();
+
+      if ((ros::Time::now() - last_time).toSec() > 1.0) {
+        ROS_WARN_THROTTLE(1.0, "[OctomapServer]: control manager diagnostics too old, can not integrate data!");
+        return;
+      }
+
+      // TODO is this the best option?
+      if (!sh_control_manager_diag_.getMsg()->flying_normally) {
+        ROS_INFO_THROTTLE(1.0, "[OctomapServer]: not flying normally, therefore, not integrating data");
+        return;
+      }
+    }
+  }
+
   sensor_msgs::LaserScanConstPtr scan = wrp.getMsg();
 
   PCLPointCloud::Ptr pc              = boost::make_shared<PCLPointCloud>();
@@ -516,6 +545,30 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
     return;
   }
 
+  if (!_map_while_grounded_) {
+
+    if (!sh_control_manager_diag_.hasMsg()) {
+
+      ROS_WARN_THROTTLE(1.0, "[OctomapServer]: missing control manager diagnostics, can not integrate data!");
+      return;
+
+    } else {
+
+      ros::Time last_time = sh_control_manager_diag_.lastMsgTime();
+
+      if ((ros::Time::now() - last_time).toSec() > 1.0) {
+        ROS_WARN_THROTTLE(1.0, "[OctomapServer]: control manager diagnostics too old, can not integrate data!");
+        return;
+      }
+
+      // TODO is this the best option?
+      if (!sh_control_manager_diag_.getMsg()->flying_normally) {
+        ROS_INFO_THROTTLE(1.0, "[OctomapServer]: not flying normally, therefore, not integrating data");
+        return;
+      }
+    }
+  }
+
   sensor_msgs::PointCloud2ConstPtr cloud = wrp.getMsg();
 
   ros::Time time_start = ros::Time::now();
@@ -568,6 +621,21 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
   }
 
   free_vectors_pc->header = pc->header;
+
+  // Voxelize data
+  {
+    pcl::VoxelGrid<PCLPoint> vg;
+    vg.setInputCloud(pc);
+    vg.setLeafSize(1.0, 1.0, 1.0);
+    vg.filter(*pc);
+  }
+
+  {
+    pcl::VoxelGrid<PCLPoint> vg;
+    vg.setInputCloud(free_vectors_pc);
+    vg.setLeafSize(2.0, 2.0, 2.0);
+    vg.filter(*free_vectors_pc);
+  }
 
   // transform to the map frame
 
