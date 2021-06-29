@@ -26,6 +26,7 @@
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/common/transforms.h>
 #include <pcl/filters/voxel_grid.h>
+#include <pcl/filters/statistical_outlier_removal.h>
 
 #include <Eigen/Geometry>
 
@@ -637,6 +638,14 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
     vg.filter(*free_vectors_pc);
   }
 
+  // filter lone pixels
+  {
+    pcl::StatisticalOutlierRemoval<PCLPoint> sor(true);
+    sor.setInputCloud(pc);
+    sor.setMeanK(50.0);
+    sor.setStddevMulThresh(1.0);
+    sor.filter(*pc);
+  }
   // transform to the map frame
 
   pcl::transformPointCloud(*pc, *pc, sensorToWorld);
