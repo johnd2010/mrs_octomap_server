@@ -627,14 +627,14 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
   {
     pcl::VoxelGrid<PCLPoint> vg;
     vg.setInputCloud(pc);
-    vg.setLeafSize(1.0, 1.0, 1.0);
+    vg.setLeafSize(0.2, 0.2, 0.2);
     vg.filter(*pc);
   }
 
   {
     pcl::VoxelGrid<PCLPoint> vg;
     vg.setInputCloud(free_vectors_pc);
-    vg.setLeafSize(2.0, 2.0, 2.0);
+    vg.setLeafSize(1.0, 1.0, 1.0);
     vg.filter(*free_vectors_pc);
   }
 
