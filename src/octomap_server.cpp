@@ -582,6 +582,7 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
 
   PCLPointCloud::Ptr pc              = boost::make_shared<PCLPointCloud>();
   PCLPointCloud::Ptr free_vectors_pc = boost::make_shared<PCLPointCloud>();
+  PCLPointCloud::Ptr hit_pc          = boost::make_shared<PCLPointCloud>();
   pcl::fromROSMsg(*cloud, *pc);
 
   auto res = transformer_.getTransform(cloud->header.frame_id, _world_frame_, cloud->header.stamp);
@@ -612,7 +613,8 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
 
       pcl::PointXYZ pt = pc->at(i);
 
-      if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z) || fabs(pt.x) > m_maxRange || fabs(pt.y) > m_maxRange || fabs(pt.z) > m_maxRange) {
+      if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z) || fabs(pt.x) > m_maxRange || fabs(pt.y) > m_maxRange ||
+          fabs(pt.z) > m_maxRange) {
 
         const vec3_t ray_vec = m_sensor_3d_xyz_lut.directions.col(i);
 
@@ -623,6 +625,8 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
 
           free_vectors_pc->push_back(pt);
         }
+      } else {
+        hit_pc->push_back(pt);
       }
     }
   }
@@ -632,9 +636,9 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
   // Voxelize data
   {
     pcl::VoxelGrid<PCLPoint> vg;
-    vg.setInputCloud(pc);
+    vg.setInputCloud(hit_pc);
     vg.setLeafSize(0.2, 0.2, 0.2);
-    vg.filter(*pc);
+    vg.filter(*hit_pc);
   }
 
   {
@@ -647,20 +651,20 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
   // filter lone pixels
   {
     pcl::StatisticalOutlierRemoval<PCLPoint> sor(true);
-    sor.setInputCloud(pc);
+    sor.setInputCloud(hit_pc);
     sor.setMeanK(50.0);
     sor.setStddevMulThresh(1.0);
-    sor.filter(*pc);
+    sor.filter(*hit_pc);
   }
   // transform to the map frame
 
-  pcl::transformPointCloud(*pc, *pc, sensorToWorld);
+  pcl::transformPointCloud(*hit_pc, *hit_pc, sensorToWorld);
   pcl::transformPointCloud(*free_vectors_pc, *free_vectors_pc, sensorToWorld);
 
-  pc->header.frame_id              = _world_frame_;
+  hit_pc->header.frame_id          = _world_frame_;
   free_vectors_pc->header.frame_id = _world_frame_;
 
-  insertPointCloud(sensorToWorldTf.transform.translation, pc, free_vectors_pc);
+  insertPointCloud(sensorToWorldTf.transform.translation, hit_pc, free_vectors_pc);
 
   const octomap::point3d sensor_origin = octomap::pointTfToOctomap(sensorToWorldTf.transform.translation);
 
@@ -1125,8 +1129,6 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
   std::scoped_lock lock(mutex_octree_);
 
-  mrs_lib::ScopeTimer timer("insertPointCloud");
-
   const octomap::point3d sensor_origin = octomap::pointTfToOctomap(sensorOriginTf);
 
   if (!octree_->coordToKeyChecked(sensor_origin, m_updateBBXMin) || !octree_->coordToKeyChecked(sensor_origin, m_updateBBXMax)) {
@@ -1144,8 +1146,6 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
   octomap::KeySet free_ends;
 
   const bool free_space_bounded = free_space_ray_len > 0.0f;
-
-  timer.checkpoint("iterate all measured");
 
   // all measured points: make it free on ray, occupied on endpoint:
   for (PCLPointCloud::const_iterator it = cloud->begin(); it != cloud->end(); ++it) {
@@ -1169,8 +1169,6 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
     free_ends.insert(measured_key);
   }
-
-  timer.checkpoint("iterate free vectors");
 
   for (PCLPointCloud::const_iterator it = free_vectors_cloud->begin(); it != free_vectors_cloud->end(); ++it) {
 
@@ -1210,8 +1208,6 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
     }
   }
 
-  timer.checkpoint("iterate free ends");
-
   // for FREE RAY ENDS
   for (octomap::KeySet::iterator it = free_ends.begin(), end = free_ends.end(); it != end; ++it) {
 
@@ -1245,8 +1241,6 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
     octree_->setNodeValue(key, 0.0);
   }
 
-  timer.checkpoint("add free cells");
-
   // FREE CELLS
   for (octomap::KeySet::iterator it = free_cells.begin(), end = free_cells.end(); it != end; ++it) {
 
@@ -1257,8 +1251,6 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
   }
 
   /* first_iter = true; */
-
-  timer.checkpoint("add occupied cells");
 
   // OCCUPIED CELLS
   for (octomap::KeySet::iterator it = occupied_cells.begin(), end = occupied_cells.end(); it != end; it++) {

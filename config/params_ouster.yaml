@@ -1,6 +1,6 @@
 resolution: 1.00 # [m]
 
-map_while_grounded: false
+map_while_grounded: true
 
 persistency:
 
