@@ -99,7 +99,6 @@ public:
   bool callbackResetMap(std_srvs::Empty::Request& req, std_srvs::Empty::Response& resp);
 
   bool callbackSetFractor([[maybe_unused]] mrs_msgs::SetInt::Request& req, [[maybe_unused]] mrs_msgs::SetInt::Response& resp);
-  int  resolution_fractor_ = 3;
 
   void callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>& wrp);
   void callbackLaserScan(mrs_lib::SubscribeHandler<sensor_msgs::LaserScan>& wrp);
@@ -130,7 +129,7 @@ private:
   ros::ServiceServer ss_reset_map_;
   ros::ServiceServer ss_save_map_;
   ros::ServiceServer ss_load_map_;
-  ros::ServiceServer ss_set_mode_;
+  ros::ServiceServer ss_set_fractor_;
 
   // | ------------------------- timers ------------------------- |
 
@@ -210,6 +209,9 @@ private:
   bool   _unknown_rays_update_free_space_;
   bool   _unknown_rays_clear_occupied_;
   double _unknown_rays_distance_;
+
+  int        resolution_fractor_;
+  std::mutex mutex_resolution_fractor_;
 
   laser_geometry::LaserProjection projector_;
 
@@ -296,7 +298,8 @@ void OctomapServer::onInit() {
   param_loader.loadParam("local_map/publish_full", _local_map_publish_full_);
   param_loader.loadParam("local_map/publish_binary", _local_map_publish_binary_);
 
-  param_loader.loadParam("resolution", octree_resolution_);
+  param_loader.loadParam("mapping/resolution", octree_resolution_);
+  param_loader.loadParam("mapping/initial_fractor", resolution_fractor_);
   param_loader.loadParam("world_frame_id", _world_frame_);
   param_loader.loadParam("robot_frame_id", _robot_frame_);
 
@@ -408,10 +411,10 @@ void OctomapServer::onInit() {
 
   /* service servers //{ */
 
-  ss_reset_map_ = nh_.advertiseService("reset_map_in", &OctomapServer::callbackResetMap, this);
-  ss_save_map_  = nh_.advertiseService("save_map_in", &OctomapServer::callbackSaveMap, this);
-  ss_load_map_  = nh_.advertiseService("load_map_in", &OctomapServer::callbackLoadMap, this);
-  ss_set_mode_  = nh_.advertiseService("set_mode", &OctomapServer::callbackSetFractor, this);
+  ss_reset_map_   = nh_.advertiseService("reset_map_in", &OctomapServer::callbackResetMap, this);
+  ss_save_map_    = nh_.advertiseService("save_map_in", &OctomapServer::callbackSaveMap, this);
+  ss_load_map_    = nh_.advertiseService("load_map_in", &OctomapServer::callbackLoadMap, this);
+  ss_set_fractor_ = nh_.advertiseService("set_fractor_in", &OctomapServer::callbackSetFractor, this);
 
   //}
 
@@ -675,10 +678,10 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
 
     double exec_duration = (time_end - time_start).toSec();
 
-    double coef               = 0.95;
+    double coef               = 0.5;
     avg_time_cloud_insertion_ = coef * avg_time_cloud_insertion_ + (1.0 - coef) * exec_duration;
 
-    ROS_INFO_THROTTLE(5.0, "[OctomapServer]: avg cloud insertion time = %.3f sec", avg_time_cloud_insertion_);
+    ROS_INFO_THROTTLE(1.0, "[OctomapServer]: avg cloud insertion time = %.3f sec", avg_time_cloud_insertion_);
   }
 }
 
@@ -765,11 +768,32 @@ bool OctomapServer::callbackResetMap([[maybe_unused]] std_srvs::Empty::Request& 
 
 //}
 
-/* callbackSetMode() //{ */
+/* callbackSetFractor() //{ */
 
 bool OctomapServer::callbackSetFractor([[maybe_unused]] mrs_msgs::SetInt::Request& req, [[maybe_unused]] mrs_msgs::SetInt::Response& resp) {
 
-  resolution_fractor_ = req.value;
+  if (!is_initialized_) {
+    return false;
+  }
+
+  std::stringstream ss;
+
+  if (req.value < 0) {
+
+    ss << "fractore < 0 does not make sense!";
+    ROS_ERROR_STREAM_THROTTLE(1.0, "[OctomapServer]: " << ss.str());
+
+    resp.message = ss.str();
+    resp.success = false;
+
+    return true;
+  }
+
+  {
+    std::scoped_lock lock(mutex_resolution_fractor_);
+
+    resolution_fractor_ = req.value;
+  }
 
   resp.message = "fractor set";
   resp.success = true;
@@ -880,7 +904,7 @@ void OctomapServer::timerLocalMap([[maybe_unused]] const ros::TimerEvent& evt) {
   double vertical_distance   = _local_map_vertical_distance_ + local_map_vertical_offset_;
 
   if (horizontal_distance < 10) {
-    vertical_distance = 10;
+    horizontal_distance = 10;
     ROS_ERROR_THROTTLE(1.0, "[OctomapServer]: saturating local map size to 10, your computer is probably not very powerfull");
   }
 
@@ -1129,6 +1153,8 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
   std::scoped_lock lock(mutex_octree_);
 
+  auto resolution_fractor = mrs_lib::get_mutexed(mutex_resolution_fractor_, resolution_fractor_);
+
   const octomap::point3d sensor_origin = octomap::pointTfToOctomap(sensorOriginTf);
 
   if (!octree_->coordToKeyChecked(sensor_origin, m_updateBBXMin) || !octree_->coordToKeyChecked(sensor_origin, m_updateBBXMax)) {
@@ -1137,7 +1163,7 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
   const float free_space_ray_len = float(_unknown_rays_distance_);
 
-  double coarse_res = octree_->getResolution() * pow(2.0, resolution_fractor_);
+  double coarse_res = octree_->getResolution() * pow(2.0, resolution_fractor);
 
   ROS_INFO_THROTTLE(1.0, "[OctomapServer]: current resolution = %.2f m", coarse_res);
 
@@ -1180,7 +1206,7 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
     octomap::KeyRay  keyRay;
 
     // check if the ray intersects a cell in the occupied list
-    if (octree_->computeRayKeys(sensor_origin, measured_point, keyRay, resolution_fractor_)) {
+    if (octree_->computeRayKeys(sensor_origin, measured_point, keyRay, resolution_fractor)) {
 
       octomap::KeyRay::iterator alterantive_ray_end = keyRay.end();
 
@@ -1214,7 +1240,7 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
     octomap::point3d coords = octree_->keyToCoord(*it);
 
     octomap::KeyRay key_ray;
-    if (octree_->computeRayKeys(sensor_origin, coords, key_ray, resolution_fractor_)) {
+    if (octree_->computeRayKeys(sensor_origin, coords, key_ray, resolution_fractor)) {
 
       for (octomap::KeyRay::iterator it2 = key_ray.begin(), end = key_ray.end(); it2 != end; ++it2) {
 
@@ -1246,7 +1272,7 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
     auto coords = octree_->keyToCoord(*it);
 
-    octomap::OcTreeNode* node = touchNode(octree_, *it, octree_->getTreeDepth() - resolution_fractor_);
+    octomap::OcTreeNode* node = touchNode(octree_, *it, octree_->getTreeDepth() - resolution_fractor);
     octree_->updateNodeLogOdds(node, octree_->getProbMissLog());
   }
 
@@ -1257,7 +1283,7 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
     auto coords = octree_->keyToCoord(*it);
 
-    octomap::OcTreeNode* node = touchNode(octree_, *it, octree_->getTreeDepth() - resolution_fractor_);
+    octomap::OcTreeNode* node = touchNode(octree_, *it, octree_->getTreeDepth() - resolution_fractor);
     octree_->updateNodeLogOdds(node, octree_->getProbHitLog());
   }
 }

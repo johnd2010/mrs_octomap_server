@@ -64,6 +64,7 @@
       <remap from="~reset_map_in" to="~reset_map" />
       <remap from="~save_map_in" to="~save_map" />
       <remap from="~load_map_in" to="~load_map" />
+      <remap from="~set_fractor_in" to="~set_fractor" />
 
     </node>
 
