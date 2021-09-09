@@ -1,6 +1,5 @@
 /* includes //{ */
 
-#include "octomap/OcTree.h"
 #include <ros/init.h>
 #include <ros/ros.h>
 #include <nodelet/nodelet.h>
@@ -46,6 +45,8 @@
 #include <mrs_msgs/String.h>
 #include <mrs_msgs/ControlManagerDiagnostics.h>
 #include <mrs_msgs/Float64Stamped.h>
+
+#include <mrs_msgs/SetInt.h>
 
 #include <filesystem>
 
@@ -97,6 +98,9 @@ public:
 
   bool callbackResetMap(std_srvs::Empty::Request& req, std_srvs::Empty::Response& resp);
 
+  bool callbackSetFractor([[maybe_unused]] mrs_msgs::SetInt::Request& req, [[maybe_unused]] mrs_msgs::SetInt::Response& resp);
+  int  resolution_fractor_ = 3;
+
   void callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>& wrp);
   void callbackLaserScan(mrs_lib::SubscribeHandler<sensor_msgs::LaserScan>& wrp);
   bool loadFromFile(const std::string& filename);
@@ -126,6 +130,7 @@ private:
   ros::ServiceServer ss_reset_map_;
   ros::ServiceServer ss_save_map_;
   ros::ServiceServer ss_load_map_;
+  ros::ServiceServer ss_set_mode_;
 
   // | ------------------------- timers ------------------------- |
 
@@ -406,6 +411,7 @@ void OctomapServer::onInit() {
   ss_reset_map_ = nh_.advertiseService("reset_map_in", &OctomapServer::callbackResetMap, this);
   ss_save_map_  = nh_.advertiseService("save_map_in", &OctomapServer::callbackSaveMap, this);
   ss_load_map_  = nh_.advertiseService("load_map_in", &OctomapServer::callbackLoadMap, this);
+  ss_set_mode_  = nh_.advertiseService("set_mode", &OctomapServer::callbackSetFractor, this);
 
   //}
 
@@ -534,7 +540,7 @@ void OctomapServer::callbackLaserScan(mrs_lib::SubscribeHandler<sensor_msgs::Las
 
 //}
 
-/* insertCloudCallback() //{ */
+/* callback3dLidarCloud2() //{ */
 
 void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>& wrp) {
 
@@ -606,7 +612,7 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
 
       pcl::PointXYZ pt = pc->at(i);
 
-      if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z)) {
+      if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z) || fabs(pt.x) > m_maxRange || fabs(pt.y) > m_maxRange || fabs(pt.z) > m_maxRange) {
 
         const vec3_t ray_vec = m_sensor_3d_xyz_lut.directions.col(i);
 
@@ -749,6 +755,20 @@ bool OctomapServer::callbackResetMap([[maybe_unused]] std_srvs::Empty::Request& 
   }
 
   ROS_INFO("[OctomapServer]: octomap cleared");
+
+  return true;
+}
+
+//}
+
+/* callbackSetMode() //{ */
+
+bool OctomapServer::callbackSetFractor([[maybe_unused]] mrs_msgs::SetInt::Request& req, [[maybe_unused]] mrs_msgs::SetInt::Response& resp) {
+
+  resolution_fractor_ = req.value;
+
+  resp.message = "fractor set";
+  resp.success = true;
 
   return true;
 }
@@ -1105,6 +1125,8 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
   std::scoped_lock lock(mutex_octree_);
 
+  mrs_lib::ScopeTimer timer("insertPointCloud");
+
   const octomap::point3d sensor_origin = octomap::pointTfToOctomap(sensorOriginTf);
 
   if (!octree_->coordToKeyChecked(sensor_origin, m_updateBBXMin) || !octree_->coordToKeyChecked(sensor_origin, m_updateBBXMax)) {
@@ -1113,13 +1135,19 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
   const float free_space_ray_len = float(_unknown_rays_distance_);
 
+  double coarse_res = octree_->getResolution() * pow(2.0, resolution_fractor_);
+
+  ROS_INFO_THROTTLE(1.0, "[OctomapServer]: current resolution = %.2f m", coarse_res);
+
   octomap::KeySet occupied_cells;
   octomap::KeySet free_cells;
   octomap::KeySet free_ends;
 
   const bool free_space_bounded = free_space_ray_len > 0.0f;
 
-  // all points: free on ray, occupied on endpoint:
+  timer.checkpoint("iterate all measured");
+
+  // all measured points: make it free on ray, occupied on endpoint:
   for (PCLPointCloud::const_iterator it = cloud->begin(); it != cloud->end(); ++it) {
 
     if (!(std::isfinite(it->x) && std::isfinite(it->y) && std::isfinite(it->z))) {
@@ -1142,6 +1170,8 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
     free_ends.insert(measured_key);
   }
 
+  timer.checkpoint("iterate free vectors");
+
   for (PCLPointCloud::const_iterator it = free_vectors_cloud->begin(); it != free_vectors_cloud->end(); ++it) {
 
     if (!(std::isfinite(it->x) && std::isfinite(it->y) && std::isfinite(it->z))) {
@@ -1152,7 +1182,7 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
     octomap::KeyRay  keyRay;
 
     // check if the ray intersects a cell in the occupied list
-    if (octree_->computeRayKeys(sensor_origin, measured_point, keyRay)) {
+    if (octree_->computeRayKeys(sensor_origin, measured_point, keyRay, resolution_fractor_)) {
 
       octomap::KeyRay::iterator alterantive_ray_end = keyRay.end();
 
@@ -1180,13 +1210,15 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
     }
   }
 
-  // FREE ENDS
+  timer.checkpoint("iterate free ends");
+
+  // for FREE RAY ENDS
   for (octomap::KeySet::iterator it = free_ends.begin(), end = free_ends.end(); it != end; ++it) {
 
     octomap::point3d coords = octree_->keyToCoord(*it);
 
     octomap::KeyRay key_ray;
-    if (octree_->computeRayKeys(sensor_origin, coords, key_ray)) {
+    if (octree_->computeRayKeys(sensor_origin, coords, key_ray, resolution_fractor_)) {
 
       for (octomap::KeyRay::iterator it2 = key_ray.begin(), end = key_ray.end(); it2 != end; ++it2) {
 
@@ -1204,14 +1236,37 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
     }
   }
 
+  octomap::OcTreeNode* root = octree_->getRoot();
+
+  bool got_root = root ? true : false;
+
+  if (!got_root) {
+    octomap::OcTreeKey key = octree_->coordToKey(0, 0, 0, octree_->getTreeDepth());
+    octree_->setNodeValue(key, 0.0);
+  }
+
+  timer.checkpoint("add free cells");
+
   // FREE CELLS
   for (octomap::KeySet::iterator it = free_cells.begin(), end = free_cells.end(); it != end; ++it) {
-    octree_->updateNode(*it, false);
+
+    auto coords = octree_->keyToCoord(*it);
+
+    octomap::OcTreeNode* node = touchNode(octree_, *it, octree_->getTreeDepth() - resolution_fractor_);
+    octree_->updateNodeLogOdds(node, octree_->getProbMissLog());
   }
+
+  /* first_iter = true; */
+
+  timer.checkpoint("add occupied cells");
 
   // OCCUPIED CELLS
   for (octomap::KeySet::iterator it = occupied_cells.begin(), end = occupied_cells.end(); it != end; it++) {
-    octree_->updateNode(*it, true);
+
+    auto coords = octree_->keyToCoord(*it);
+
+    octomap::OcTreeNode* node = touchNode(octree_, *it, octree_->getTreeDepth() - resolution_fractor_);
+    octree_->updateNodeLogOdds(node, octree_->getProbHitLog());
   }
 }
 
@@ -1470,6 +1525,18 @@ octomap::OcTreeNode* OctomapServer::touchNodeRecurs(std::shared_ptr<OcTree_t>& o
 
   // at last level, update node, end of recursion
   else {
+
+    // destroy all children
+    for (int i = 0; i < 8; i++) {
+
+      if (octree->nodeChildExists(node, i)) {
+
+        auto child = octree->getNodeChild(node, i);
+
+        octree->deleteNodeChild(node, i);
+      }
+    }
+
     return node;
   }
 }
