@@ -31,7 +31,7 @@
 
     <node pkg="nodelet" type="nodelet" name="octomap_server" args="$(arg nodelet) mrs_octomap_server/MrsOctomapServer $(arg nodelet_manager)" output="screen" launch-prefix="$(arg launch_prefix)">
 
-      <rosparam file="$(find mrs_octomap_server)/config/params_ouster.yaml" />
+      <rosparam file="$(find mrs_octomap_server)/config/default.yaml" />
       <rosparam if="$(eval not arg('custom_config') == '')" file="$(arg custom_config)" />
 
       <param name="uav_name" type="string" value="$(arg UAV_NAME)" />

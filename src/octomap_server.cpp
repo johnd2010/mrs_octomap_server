@@ -185,16 +185,10 @@ private:
   double     time_last_local_map_processing_ = 0;
   std::mutex mutex_time_local_map_processing_;
 
-  octomap::KeyRay    m_keyRay;  // temp storage for ray casting
-  octomap::OcTreeKey m_updateBBXMin;
-  octomap::OcTreeKey m_updateBBXMax;
-
-  double      m_maxRange;
+  double      _sensor_max_range_;
   std::string _world_frame_;
   std::string _robot_frame_;
   double      octree_resolution_;
-  unsigned    m_treeDepth;
-  unsigned    m_maxTreeDepth;
   bool        _global_map_compress_;
   std::string _map_path_;
 
@@ -246,11 +240,10 @@ private:
 
   void initializeLidarLUT(const size_t w, const size_t h);
 
-  xyz_lut_t m_sensor_3d_xyz_lut;
-  bool      m_sensor_3d_params_enabled;
-  float     m_sensor_3d_vfov;
-  int       m_sensor_3d_vrays;
-  int       m_sensor_3d_hrays;
+  xyz_lut_t sensor_3d_xyz_lut;
+  float     _sensor_3d_vfov_;
+  int       _sensor_3d_vrays_;
+  int       _sensor_3d_hrays_;
 
   // sensor model
   double _probHit_;
@@ -309,16 +302,15 @@ void OctomapServer::onInit() {
   param_loader.loadParam("unknown_rays/clear_occupied", _unknown_rays_clear_occupied_);
   param_loader.loadParam("unknown_rays/ray_distance", _unknown_rays_distance_);
 
-  param_loader.loadParam("sensor_params_3d/enabled", m_sensor_3d_params_enabled);
-  param_loader.loadParam("sensor_params_3d/vertical_fov_angle", m_sensor_3d_vfov);
-  param_loader.loadParam("sensor_params_3d/vertical_rays", m_sensor_3d_vrays);
-  param_loader.loadParam("sensor_params_3d/horizontal_rays", m_sensor_3d_hrays);
+  param_loader.loadParam("sensor_params_3d/vertical_fov_angle", _sensor_3d_vfov_);
+  param_loader.loadParam("sensor_params_3d/vertical_rays", _sensor_3d_vrays_);
+  param_loader.loadParam("sensor_params_3d/horizontal_rays", _sensor_3d_hrays_);
 
   param_loader.loadParam("sensor_model/hit", _probHit_);
   param_loader.loadParam("sensor_model/miss", _probMiss_);
   param_loader.loadParam("sensor_model/min", _thresMin_);
   param_loader.loadParam("sensor_model/max", _thresMax_);
-  param_loader.loadParam("sensor_model/max_range", m_maxRange);
+  param_loader.loadParam("sensor_model/max_range", _sensor_max_range_);
 
   if (!param_loader.loadedSuccessfully()) {
     ROS_ERROR("[%s]: Could not load all non-optional parameters. Shutting down.", ros::this_node::getName().c_str());
@@ -329,10 +321,7 @@ void OctomapServer::onInit() {
 
   /* initialize sensor LUT model //{ */
 
-  if (m_sensor_3d_params_enabled) {
-
-    initializeLidarLUT(m_sensor_3d_hrays, m_sensor_3d_vrays);
-  }
+  initializeLidarLUT(_sensor_3d_hrays_, _sensor_3d_vrays_);
 
   //}
 
@@ -349,9 +338,6 @@ void OctomapServer::onInit() {
   octree_local_->setProbMiss(_probMiss_);
   octree_local_->setClampingThresMin(_thresMin_);
   octree_local_->setClampingThresMax(_thresMax_);
-
-  m_treeDepth    = octree_->getTreeDepth();
-  m_maxTreeDepth = m_treeDepth;
 
   if (_persistency_enabled_) {
 
@@ -616,10 +602,10 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
 
       pcl::PointXYZ pt = pc->at(i);
 
-      if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z) || fabs(pt.x) > m_maxRange || fabs(pt.y) > m_maxRange ||
-          fabs(pt.z) > m_maxRange) {
+      if (!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z) || fabs(pt.x) > _sensor_max_range_ || fabs(pt.y) > _sensor_max_range_ ||
+          fabs(pt.z) > _sensor_max_range_) {
 
-        const vec3_t ray_vec = m_sensor_3d_xyz_lut.directions.col(i);
+        const vec3_t ray_vec = sensor_3d_xyz_lut.directions.col(i);
 
         if (ray_vec(2) > 0.0) {
           pt.x = ray_vec(0) * float(_unknown_rays_distance_);
@@ -1157,10 +1143,6 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
   const octomap::point3d sensor_origin = octomap::pointTfToOctomap(sensorOriginTf);
 
-  if (!octree_->coordToKeyChecked(sensor_origin, m_updateBBXMin) || !octree_->coordToKeyChecked(sensor_origin, m_updateBBXMax)) {
-    ROS_ERROR_STREAM("Could not generate Key for origin " << sensor_origin);
-  }
-
   const float free_space_ray_len = float(_unknown_rays_distance_);
 
   double coarse_res = octree_->getResolution() * pow(2.0, resolution_fractor);
@@ -1300,8 +1282,8 @@ void OctomapServer::initializeLidarLUT(const size_t w, const size_t h) {
   const double                                    minAngle = 0.0;
   const double                                    maxAngle = 2.0 * M_PI;
 
-  const double verticalMinAngle = -m_sensor_3d_vfov / 2.0;
-  const double verticalMaxAngle = m_sensor_3d_vfov / 2.0;
+  const double verticalMinAngle = -_sensor_3d_vfov_ / 2.0;
+  const double verticalMaxAngle = _sensor_3d_vfov_ / 2.0;
 
   const double yDiff = maxAngle - minAngle;
   const double pDiff = verticalMaxAngle - verticalMinAngle;
@@ -1331,14 +1313,14 @@ void OctomapServer::initializeLidarLUT(const size_t w, const size_t h) {
   }
 
   int it = 0;
-  m_sensor_3d_xyz_lut.directions.resize(3, rangeCount * verticalRangeCount);
-  m_sensor_3d_xyz_lut.offsets.resize(3, rangeCount * verticalRangeCount);
+  sensor_3d_xyz_lut.directions.resize(3, rangeCount * verticalRangeCount);
+  sensor_3d_xyz_lut.offsets.resize(3, rangeCount * verticalRangeCount);
 
   for (int row = 0; row < verticalRangeCount; row++) {
     for (int col = 0; col < rangeCount; col++) {
       const auto [x_coeff, y_coeff, z_coeff] = coord_coeffs.at(col * verticalRangeCount + row);
-      m_sensor_3d_xyz_lut.directions.col(it) = vec3_t(x_coeff, y_coeff, z_coeff);
-      m_sensor_3d_xyz_lut.offsets.col(it)    = vec3_t(0, 0, 0);
+      sensor_3d_xyz_lut.directions.col(it)   = vec3_t(x_coeff, y_coeff, z_coeff);
+      sensor_3d_xyz_lut.offsets.col(it)      = vec3_t(0, 0, 0);
       it++;
     }
   }
@@ -1383,22 +1365,7 @@ bool OctomapServer::loadFromFile(const std::string& filename) {
       return false;
     }
 
-    m_treeDepth        = octree_->getTreeDepth();
-    m_maxTreeDepth     = m_treeDepth;
     octree_resolution_ = octree_->getResolution();
-
-    double minX, minY, minZ;
-    double maxX, maxY, maxZ;
-    octree_->getMetricMin(minX, minY, minZ);
-    octree_->getMetricMax(maxX, maxY, maxZ);
-
-    m_updateBBXMin[0] = octree_->coordToKey(minX);
-    m_updateBBXMin[1] = octree_->coordToKey(minY);
-    m_updateBBXMin[2] = octree_->coordToKey(minZ);
-
-    m_updateBBXMax[0] = octree_->coordToKey(maxX);
-    m_updateBBXMax[1] = octree_->coordToKey(maxY);
-    m_updateBBXMax[2] = octree_->coordToKey(maxZ);
   }
 
   return true;
