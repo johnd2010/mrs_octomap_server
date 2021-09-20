@@ -781,6 +781,21 @@ bool OctomapServer::callbackSetFractor([[maybe_unused]] mrs_msgs::SetInt::Reques
     resolution_fractor_ = req.value;
   }
 
+  {
+    std::scoped_lock lock(mutex_octree_);
+
+    for (OcTree_t::leaf_iterator it = octree_->begin_leafs(octree_->getTreeDepth() - req.value), end = octree_->end_leafs(); it != end; ++it) {
+
+      auto orig_key = it.getKey();
+
+      const unsigned int old_depth = it.getDepth();
+
+      octomap::OcTreeNode* orig_node = it.getNode();
+
+      octree_->eatChildren(orig_node);
+    }
+  }
+
   resp.message = "fractor set";
   resp.success = true;
 
@@ -1252,10 +1267,12 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
   // FREE CELLS
   for (octomap::KeySet::iterator it = free_cells.begin(), end = free_cells.end(); it != end; ++it) {
 
-    auto coords = octree_->keyToCoord(*it);
+    /* auto coords = octree_->keyToCoord(*it); */
 
-    octomap::OcTreeNode* node = touchNode(octree_, *it, octree_->getTreeDepth() - resolution_fractor);
-    octree_->updateNodeLogOdds(node, octree_->getProbMissLog());
+    /* octomap::OcTreeNode* node = touchNode(octree_, *it, octree_->getTreeDepth() - resolution_fractor); */
+    /* octree_->updateNodeLogOdds(node, octree_->getProbMissLog()); */
+    /* octree_->setNodeValueDepth(*it,octree_->getProbMiss(), octree_->getTreeDepth() - resolution_fractor); */
+    octree_->updateNodeDepth(*it, octree_->getProbMissLog(), octree_->getTreeDepth() - resolution_fractor);
   }
 
   /* first_iter = true; */
@@ -1263,10 +1280,12 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
   // OCCUPIED CELLS
   for (octomap::KeySet::iterator it = occupied_cells.begin(), end = occupied_cells.end(); it != end; it++) {
 
-    auto coords = octree_->keyToCoord(*it);
+    /* auto coords = octree_->keyToCoord(*it); */
 
-    octomap::OcTreeNode* node = touchNode(octree_, *it, octree_->getTreeDepth() - resolution_fractor);
-    octree_->updateNodeLogOdds(node, octree_->getProbHitLog());
+    /* octomap::OcTreeNode* node = touchNode(octree_, *it, octree_->getTreeDepth() - resolution_fractor); */
+    /* octree_->updateNodeLogOdds(node, octree_->getProbHitLog()); */
+    /* octree_->setNodeValueDepth(*it, octree_->getProbHit(), octree_->getTreeDepth() - resolution_fractor); */
+    octree_->updateNodeDepth(*it, octree_->getProbHitLog(), octree_->getTreeDepth() - resolution_fractor);
   }
 }
 
@@ -1460,11 +1479,16 @@ bool OctomapServer::copyInsideBBX2(std::shared_ptr<OcTree_t>& from, std::shared_
     to->setNodeValue(key, 1.0);
   }
 
-  for (OcTree_t::leaf_bbx_iterator it = from->begin_leafs_bbx(p_min, p_max), end = from->end_leafs_bbx(); it != end; ++it) {
+  for (OcTree_t::leaf_bbx_iterator it = from->begin_leafs_bbx(p_min, p_max, from->getTreeDepth() - resolution_fractor_), end = from->end_leafs_bbx(); it != end;
+       ++it) {
+
+    octomap::OcTreeNode* orig_node = it.getNode();
+
+    from->eatChildren(orig_node);
 
     octomap::OcTreeKey   k    = it.getKey();
     octomap::OcTreeNode* node = touchNode(to, k, it.getDepth());
-    node->setValue(it->getValue());
+    node->setValue(orig_node->getValue());
   }
 
   if (!got_root) {
@@ -1511,16 +1535,18 @@ octomap::OcTreeNode* OctomapServer::touchNodeRecurs(std::shared_ptr<OcTree_t>& o
   // at last level, update node, end of recursion
   else {
 
+    octree->eatChildren(node);
+
     // destroy all children
-    for (int i = 0; i < 8; i++) {
+    /* for (int i = 0; i < 8; i++) { */
 
-      if (octree->nodeChildExists(node, i)) {
+    /*   if (octree->nodeChildExists(node, i)) { */
 
-        auto child = octree->getNodeChild(node, i);
+    /*     auto child = octree->getNodeChild(node, i); */
 
-        octree->deleteNodeChild(node, i);
-      }
-    }
+    /*     octree->deleteNodeChild(node, i); */
+    /*   } */
+    /* } */
 
     return node;
   }

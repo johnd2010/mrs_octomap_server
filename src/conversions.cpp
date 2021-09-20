@@ -67,5 +67,5 @@ void pointCloud2ToOctomap(const sensor_msgs::PointCloud2& cloud, Pointcloud& oct
       octomapCloud.push_back(*iter_x, *iter_y, *iter_z);
   }
 }
-}  // namespace octomap
 
+}  // namespace octomap
