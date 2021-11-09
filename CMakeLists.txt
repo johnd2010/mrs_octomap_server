@@ -16,32 +16,37 @@ endif()
 
 set(PACKAGE_DEPENDENCIES
   roscpp
+  cmake_modules
   nodelet
   sensor_msgs
   std_msgs
   nav_msgs
   geometry_msgs
+  pcl_ros
   pcl_conversions
   octomap_ros
   octomap_msgs
   mrs_lib
   laser_geometry
   mrs_msgs
+  octomap_tools
   )
 
 find_package(catkin REQUIRED COMPONENTS ${PACKAGE_DEPENDENCIES})
+find_package(PCL REQUIRED COMPONENTS)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_compile_options("-fPIC")
+# add_compile_options("-fsanitize=address")
+# add_link_options("-fsanitize=address")
+
 add_compile_options("${PCL_COMPILE_OPTIONS}")
 
 find_package(OpenMP REQUIRED)
 
 find_package(octomap REQUIRED)
-add_definitions(-DOCTOMAP_NODEBUGOUT)
 
 # include Eigen3
 find_package(Eigen3 REQUIRED)
@@ -59,13 +64,17 @@ include_directories(
   include
   ${catkin_INCLUDE_DIRS}
   ${Eigen_INCLUDE_DIRS}
-  ${PCL_INCLUDE_DIRS}
   ${OCTOMAP_INCLUDE_DIRS}
+  ${PCL_INCLUDE_DIRS}
   )
+
+link_directories(
+  ${PCL_LIBRARIES}
+)
 
 # MrsOctomapServer
 
-add_library(MrsOctomapServer SHARED
+add_library(MrsOctomapServer
   src/octomap_server.cpp
   src/conversions.cpp
   )
@@ -74,6 +83,8 @@ add_dependencies(MrsOctomapServer
   ${${PROJECT_NAME}_EXPORTED_TARGETS}
   ${catkin_EXPORTED_TARGETS}
   )
+
+target_include_directories(MrsOctomapServer PUBLIC ${PCL_INCLUDE_DIRS})
 
 target_link_libraries(MrsOctomapServer
   ${catkin_LIBRARIES}
