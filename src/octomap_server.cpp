@@ -206,7 +206,7 @@ private:
   bool   _local_map_publish_full_;
   bool   _local_map_publish_binary_;
 
-  mrs_lib::Transformer transformer_;
+  std::unique_ptr<mrs_lib::Transformer> transformer_;
 
   std::shared_ptr<OcTree_t> octree_;
   std::mutex                mutex_octree_;
@@ -480,7 +480,8 @@ void OctomapServer::onInit() {
 
   /* transformer //{ */
 
-  transformer_ = mrs_lib::Transformer("OctomapServer", _uav_name_);
+  transformer_ = std::make_unique<mrs_lib::Transformer>("OctomapServer");
+  transformer_->setDefaultPrefix(_uav_name_);
 
   //}
 
@@ -612,14 +613,14 @@ void OctomapServer::callbackLaserScan(mrs_lib::SubscribeHandler<sensor_msgs::Las
   Eigen::Matrix4f                 sensorToWorld;
   geometry_msgs::TransformStamped sensorToWorldTf;
 
-  auto res = transformer_.getTransform(scan->header.frame_id, _world_frame_, scan->header.stamp);
+  auto res = transformer_->getTransform(scan->header.frame_id, _world_frame_, scan->header.stamp);
 
   if (!res) {
     ROS_WARN_THROTTLE(1.0, "[OctomapServer]: insertLaserScanCallback(): could not find tf from %s to %s", scan->header.frame_id.c_str(), _world_frame_.c_str());
     return;
   }
 
-  pcl_ros::transformAsMatrix(res.value().getTransform().transform, sensorToWorld);
+  pcl_ros::transformAsMatrix(res.value().transform, sensorToWorld);
 
   // laser scan to point cloud
   sensor_msgs::PointCloud2 ros_cloud;
@@ -710,7 +711,7 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
 
   pcl::fromROSMsg(*cloud, *pc);
 
-  auto res = transformer_.getTransform(cloud->header.frame_id, _world_frame_, cloud->header.stamp);
+  auto res = transformer_->getTransform(cloud->header.frame_id, _world_frame_, cloud->header.stamp);
 
   if (!res) {
     ROS_WARN_THROTTLE(1.0, "[OctomapServer]: callback3dLidarCloud2(): could not find tf from %s to %s", cloud->header.frame_id.c_str(), _world_frame_.c_str());
@@ -718,7 +719,7 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
   }
 
   Eigen::Matrix4f                 sensorToWorld;
-  geometry_msgs::TransformStamped sensorToWorldTf = res.value().getTransform();
+  geometry_msgs::TransformStamped sensorToWorldTf = res.value();
   pcl_ros::transformAsMatrix(sensorToWorldTf.transform, sensorToWorld);
 
   double max_range;
@@ -1265,13 +1266,13 @@ void OctomapServer::timerAltitudeAlignment([[maybe_unused]] const ros::TimerEven
 
   // | ------ get the current UAV position in the map frame ----- |
 
-  auto res = transformer_.getTransform(_robot_frame_, _world_frame_);
+  auto res = transformer_->getTransform(_robot_frame_, _world_frame_);
 
   double robot_x, robot_y, robot_z;
 
   if (res) {
 
-    geometry_msgs::TransformStamped world_to_robot = res.value().getTransform();
+    geometry_msgs::TransformStamped world_to_robot = res.value();
 
     robot_x = world_to_robot.transform.translation.x;
     robot_y = world_to_robot.transform.translation.y;
@@ -1456,7 +1457,7 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
     /* octomap::OcTreeNode* node = touchNode(octree_, *it, octree_->getTreeDepth() - resolution_fractor); */
     /* octree_->updateNodeLogOdds(node, octree_->getProbMissLog()); */
     /* octree_->setNodeValueDepth(*it,octree_->getProbMiss(), octree_->getTreeDepth() - resolution_fractor); */
-    octree_->updateNodeDepth(*it, octree_->getProbMissLog(), octree_->getTreeDepth() - resolution_fractor);
+    octree_->updateNodeDepth(*it, octree_->getProbMissLog(), int(octree_->getTreeDepth()) - resolution_fractor);
   }
 
   /* first_iter = true; */
@@ -1469,7 +1470,7 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
     /* octomap::OcTreeNode* node = touchNode(octree_, *it, octree_->getTreeDepth() - resolution_fractor); */
     /* octree_->updateNodeLogOdds(node, octree_->getProbHitLog()); */
     /* octree_->setNodeValueDepth(*it, octree_->getProbHit(), octree_->getTreeDepth() - resolution_fractor); */
-    octree_->updateNodeDepth(*it, octree_->getProbHitLog(), octree_->getTreeDepth() - resolution_fractor);
+    octree_->updateNodeDepth(*it, octree_->getProbHitLog(), int(octree_->getTreeDepth()) - resolution_fractor);
   }
 }
 
@@ -1904,14 +1905,14 @@ bool OctomapServer::createLocalMap(const std::string frame_id, const double hori
 
   ros::Time time_start = ros::Time::now();
 
-  auto res = transformer_.getTransform(frame_id, _world_frame_);
+  auto res = transformer_->getTransform(frame_id, _world_frame_);
 
   if (!res) {
     ROS_WARN_THROTTLE(1.0, "[OctomapServer]: createLocalMap(): could not find tf from %s to %s", frame_id.c_str(), _world_frame_.c_str());
     return false;
   }
 
-  geometry_msgs::TransformStamped world_to_robot = res.value().getTransform();
+  geometry_msgs::TransformStamped world_to_robot = res.value();
 
   double robot_x = world_to_robot.transform.translation.x;
   double robot_y = world_to_robot.transform.translation.y;
