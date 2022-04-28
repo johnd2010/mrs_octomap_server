@@ -482,7 +482,8 @@ void OctomapServer::onInit() {
 
   transformer_ = std::make_unique<mrs_lib::Transformer>("OctomapServer");
   transformer_->setDefaultPrefix(_uav_name_);
-  transformer_->retryLookupNewest(true);
+  transformer_->setLookupTimeout(ros::Duration(0.2));
+  transformer_->retryLookupNewest(false);
 
   //}
 
