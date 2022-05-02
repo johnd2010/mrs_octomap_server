@@ -134,7 +134,8 @@ public:
 
   bool callbackResetMap(std_srvs::Empty::Request& req, std_srvs::Empty::Response& resp);
 
-  bool callbackSetFractor([[maybe_unused]] mrs_msgs::SetInt::Request& req, [[maybe_unused]] mrs_msgs::SetInt::Response& resp);
+  bool callbackSetLocalFractor([[maybe_unused]] mrs_msgs::SetInt::Request& req, [[maybe_unused]] mrs_msgs::SetInt::Response& resp);
+  bool callbackSetGlobalFractor([[maybe_unused]] mrs_msgs::SetInt::Request& req, [[maybe_unused]] mrs_msgs::SetInt::Response& resp);
 
   void callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>& wrp, const SensorType_t sensor_type, const int sensor_id);
   void callbackLaserScan(mrs_lib::SubscribeHandler<sensor_msgs::LaserScan>& wrp);
@@ -167,7 +168,8 @@ private:
   ros::ServiceServer ss_reset_map_;
   ros::ServiceServer ss_save_map_;
   ros::ServiceServer ss_load_map_;
-  ros::ServiceServer ss_set_fractor_;
+  ros::ServiceServer ss_set_global_fractor_;
+  ros::ServiceServer ss_set_local_fractor_;
 
   // | ------------------------- timers ------------------------- |
 
@@ -258,10 +260,10 @@ private:
 
   laser_geometry::LaserProjection projector_;
 
-  bool copyInsideBBX2(std::shared_ptr<OcTree_t>& from, const int& from_fractor, std::shared_ptr<OcTree_t>& to, const octomap::point3d& p_min,
-                      const octomap::point3d& p_max);
+  bool copyInsideBBX2(std::shared_ptr<OcTree_t>& from, const int& from_fractor, std::shared_ptr<OcTree_t>& to, const int& to_fractor,
+                      const octomap::point3d& p_min, const octomap::point3d& p_max);
 
-  bool copyLocalMap(std::shared_ptr<OcTree_t>& from, const int& from_fractor, std::shared_ptr<OcTree_t>& to);
+  bool copyLocalMap(std::shared_ptr<OcTree_t>& from, const int& from_fractor, std::shared_ptr<OcTree_t>& to, const int& to_fractor);
 
   octomap::OcTreeNode* touchNodeRecurs(std::shared_ptr<OcTree_t>& octree, octomap::OcTreeNode* node, const octomap::OcTreeKey& key, unsigned int depth,
                                        unsigned int max_depth);
@@ -569,10 +571,11 @@ void OctomapServer::onInit() {
 
   /* service servers //{ */
 
-  ss_reset_map_   = nh_.advertiseService("reset_map_in", &OctomapServer::callbackResetMap, this);
-  ss_save_map_    = nh_.advertiseService("save_map_in", &OctomapServer::callbackSaveMap, this);
-  ss_load_map_    = nh_.advertiseService("load_map_in", &OctomapServer::callbackLoadMap, this);
-  ss_set_fractor_ = nh_.advertiseService("set_fractor_in", &OctomapServer::callbackSetFractor, this);
+  ss_reset_map_          = nh_.advertiseService("reset_map_in", &OctomapServer::callbackResetMap, this);
+  ss_save_map_           = nh_.advertiseService("save_map_in", &OctomapServer::callbackSaveMap, this);
+  ss_load_map_           = nh_.advertiseService("load_map_in", &OctomapServer::callbackLoadMap, this);
+  ss_set_global_fractor_ = nh_.advertiseService("set_global_fractor_in", &OctomapServer::callbackSetGlobalFractor, this);
+  ss_set_local_fractor_  = nh_.advertiseService("set_local_fractor_in", &OctomapServer::callbackSetLocalFractor, this);
 
   //}
 
@@ -994,9 +997,9 @@ bool OctomapServer::callbackResetMap([[maybe_unused]] std_srvs::Empty::Request& 
 
 //}
 
-/* callbackSetFractor() //{ */
+/* callbackSetLocalFractor() //{ */
 
-bool OctomapServer::callbackSetFractor([[maybe_unused]] mrs_msgs::SetInt::Request& req, [[maybe_unused]] mrs_msgs::SetInt::Response& resp) {
+bool OctomapServer::callbackSetGlobalFractor([[maybe_unused]] mrs_msgs::SetInt::Request& req, [[maybe_unused]] mrs_msgs::SetInt::Response& resp) {
 
   if (!is_initialized_) {
     return false;
@@ -1006,7 +1009,7 @@ bool OctomapServer::callbackSetFractor([[maybe_unused]] mrs_msgs::SetInt::Reques
 
   if (req.value < 0) {
 
-    ss << "fractore < 0 does not make sense!";
+    ss << "fractor < 0 does not make sense!";
     ROS_ERROR_STREAM_THROTTLE(1.0, "[OctomapServer]: " << ss.str());
 
     resp.message = ss.str();
@@ -1016,36 +1019,77 @@ bool OctomapServer::callbackSetFractor([[maybe_unused]] mrs_msgs::SetInt::Reques
   }
 
   {
-    std::scoped_lock lock(mutex_resolution_fractor_);
+    std::scoped_lock lock(mutex_octree_global_, mutex_resolution_fractor_);
 
-    local_resolution_fractor_ = req.value;
+    int old_fractor = global_resolution_fractor_;
+
+    global_resolution_fractor_ = req.value;
+
+    if (old_fractor < global_resolution_fractor_) {
+
+      for (OcTree_t::leaf_iterator it = octree_global_->begin_leafs(octree_global_->getTreeDepth() - req.value), end = octree_global_->end_leafs(); it != end;
+           ++it) {
+
+        auto orig_key = it.getKey();
+
+        const unsigned int old_depth = it.getDepth();
+
+        octomap::OcTreeNode* orig_node = it.getNode();
+
+        octree_global_->eatChildren(orig_node);
+      }
+    }
+  }
+
+  resp.message = "fractor set";
+  resp.success = true;
+
+  return true;
+}
+
+//}
+
+/* callbackSetLocalFractor() //{ */
+
+bool OctomapServer::callbackSetLocalFractor([[maybe_unused]] mrs_msgs::SetInt::Request& req, [[maybe_unused]] mrs_msgs::SetInt::Response& resp) {
+
+  if (!is_initialized_) {
+    return false;
+  }
+
+  std::stringstream ss;
+
+  if (req.value < 0) {
+
+    ss << "fractor < 0 does not make sense!";
+    ROS_ERROR_STREAM_THROTTLE(1.0, "[OctomapServer]: " << ss.str());
+
+    resp.message = ss.str();
+    resp.success = false;
+
+    return true;
   }
 
   {
-    std::scoped_lock lock(mutex_octree_global_, mutex_octree_local_);
+    std::scoped_lock lock(mutex_octree_local_, mutex_resolution_fractor_);
 
-    for (OcTree_t::leaf_iterator it = octree_global_->begin_leafs(octree_global_->getTreeDepth() - req.value), end = octree_global_->end_leafs(); it != end;
-         ++it) {
+    int old_fractor = local_resolution_fractor_;
 
-      auto orig_key = it.getKey();
+    local_resolution_fractor_ = req.value;
 
-      const unsigned int old_depth = it.getDepth();
+    if (old_fractor < local_resolution_fractor_) {
 
-      octomap::OcTreeNode* orig_node = it.getNode();
+      for (OcTree_t::leaf_iterator it = octree_local_->begin_leafs(octree_local_->getTreeDepth() - req.value), end = octree_local_->end_leafs(); it != end;
+           ++it) {
 
-      octree_global_->eatChildren(orig_node);
-    }
+        auto orig_key = it.getKey();
 
-    for (OcTree_t::leaf_iterator it = octree_local_->begin_leafs(octree_local_->getTreeDepth() - req.value), end = octree_local_->end_leafs(); it != end;
-         ++it) {
+        const unsigned int old_depth = it.getDepth();
 
-      auto orig_key = it.getKey();
+        octomap::OcTreeNode* orig_node = it.getNode();
 
-      const unsigned int old_depth = it.getDepth();
-
-      octomap::OcTreeNode* orig_node = it.getNode();
-
-      octree_local_->eatChildren(orig_node);
+        octree_local_->eatChildren(orig_node);
+      }
     }
   }
 
@@ -1161,7 +1205,7 @@ void OctomapServer::timerGlobalMapCreator([[maybe_unused]] const ros::TimerEvent
   {
     std::scoped_lock lock(mutex_octree_global_);
 
-    copyLocalMap(local_map_tmp_, local_resolution_fractor_, octree_global_);
+    copyLocalMap(local_map_tmp_, local_resolution_fractor_, octree_global_, global_resolution_fractor_);
   }
 }
 
@@ -1649,7 +1693,7 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
     octree_local_->clear();
 
-    copyInsideBBX2(from, local_resolution_fractor_, octree_local_, roi_min, roi_max);
+    copyInsideBBX2(from, local_resolution_fractor_, octree_local_, local_resolution_fractor_, roi_min, roi_max);
   }
 
   ros::Time time_end = ros::Time::now();
@@ -1876,8 +1920,8 @@ bool OctomapServer::saveToFile(const std::string& filename) {
 
 /* copyInsideBBX2() //{ */
 
-bool OctomapServer::copyInsideBBX2(std::shared_ptr<OcTree_t>& from, const int& from_fractor, std::shared_ptr<OcTree_t>& to, const octomap::point3d& p_min,
-                                   const octomap::point3d& p_max) {
+bool OctomapServer::copyInsideBBX2(std::shared_ptr<OcTree_t>& from, const int& from_fractor, std::shared_ptr<OcTree_t>& to, const int& to_fractor,
+                                   const octomap::point3d& p_min, const octomap::point3d& p_max) {
 
   octomap::OcTreeKey minKey, maxKey;
 
@@ -1907,6 +1951,18 @@ bool OctomapServer::copyInsideBBX2(std::shared_ptr<OcTree_t>& from, const int& f
     node->setValue(orig_node->getValue());
   }
 
+  // update the region the the fractor of the global map
+  if (to_fractor > from_fractor) {
+
+    // iterate over leafs of the original "from" tree (up to the desired fractor depth)
+    for (OcTree_t::leaf_bbx_iterator it = to->begin_leafs_bbx(p_min, p_max, to->getTreeDepth() - to_fractor), end = to->end_leafs_bbx(); it != end; ++it) {
+
+      octomap::OcTreeNode* orig_node = it.getNode();
+
+      to->eatChildren(orig_node);
+    }
+  }
+
   if (!got_root) {
     octomap::OcTreeKey key = to->coordToKey(p_min.x() - to->getResolution() * 2.0, p_min.y(), p_min.z(), to->getTreeDepth());
     to->deleteNode(key, to->getTreeDepth());
@@ -1919,7 +1975,7 @@ bool OctomapServer::copyInsideBBX2(std::shared_ptr<OcTree_t>& from, const int& f
 
 /* copyLocalMap() //{ */
 
-bool OctomapServer::copyLocalMap(std::shared_ptr<OcTree_t>& from, const int& from_fractor, std::shared_ptr<OcTree_t>& to) {
+bool OctomapServer::copyLocalMap(std::shared_ptr<OcTree_t>& from, const int& from_fractor, std::shared_ptr<OcTree_t>& to, const int& to_fractor) {
 
   octomap::OcTreeKey minKey, maxKey;
 
@@ -1942,6 +1998,27 @@ bool OctomapServer::copyLocalMap(std::shared_ptr<OcTree_t>& from, const int& fro
     octomap::OcTreeKey   k    = it.getKey();
     octomap::OcTreeNode* node = touchNode(to, k, it.getDepth());
     node->setValue(orig_node->getValue());
+  }
+
+  // update the region the the fractor of the global map
+  if (to_fractor > from_fractor) {
+
+    double min_x, min_y, min_z;
+    double max_x, max_y, max_z;
+
+    from->getMetricMin(min_x, min_y, min_z);
+    from->getMetricMax(max_x, max_y, max_z);
+
+    octomap::point3d p_min(min_x, min_y, min_z);
+    octomap::point3d p_max(max_x, max_y, max_z);
+
+    // iterate over leafs of the original "from" tree (up to the desired fractor depth)
+    for (OcTree_t::leaf_bbx_iterator it = to->begin_leafs_bbx(p_min, p_max, to->getTreeDepth() - to_fractor), end = to->end_leafs_bbx(); it != end; ++it) {
+
+      octomap::OcTreeNode* orig_node = it.getNode();
+
+      to->eatChildren(orig_node);
+    }
   }
 
   if (!got_root) {
@@ -1989,17 +2066,6 @@ octomap::OcTreeNode* OctomapServer::touchNodeRecurs(std::shared_ptr<OcTree_t>& o
   else {
 
     octree->eatChildren(node);
-
-    // destroy all children
-    /* for (int i = 0; i < 8; i++) { */
-
-    /*   if (octree->nodeChildExists(node, i)) { */
-
-    /*     auto child = octree->getNodeChild(node, i); */
-
-    /*     octree->deleteNodeChild(node, i); */
-    /*   } */
-    /* } */
 
     return node;
   }
@@ -2118,64 +2184,6 @@ bool OctomapServer::translateMap(std::shared_ptr<OcTree_t>& octree, const double
 
   return true;
 }
-
-//}
-
-/* createLocalMap() //{ */
-
-/* bool OctomapServer::createLocalMap(const std::string frame_id, const double horizontal_distance, const double vertical_distance, */
-/*                                    std::shared_ptr<OcTree_t>& octree) { */
-
-/*   std::scoped_lock lock(mutex_octree_); */
-
-/*   ros::Time time_start = ros::Time::now(); */
-
-/*   auto res = transformer_->getTransform(frame_id, _world_frame_); */
-
-/*   if (!res) { */
-/*     ROS_WARN_THROTTLE(1.0, "[OctomapServer]: createLocalMap(): could not find tf from %s to %s", frame_id.c_str(), _world_frame_.c_str()); */
-/*     return false; */
-/*   } */
-
-/*   geometry_msgs::TransformStamped world_to_robot = res.value(); */
-
-/*   double robot_x = world_to_robot.transform.translation.x; */
-/*   double robot_y = world_to_robot.transform.translation.y; */
-/*   double robot_z = world_to_robot.transform.translation.z; */
-
-/*   bool success = true; */
-
-/*   // clear the old local map */
-/*   octree->clear(); */
-
-/*   const octomap::point3d p_min = */
-/*       octomap::point3d(float(robot_x - horizontal_distance), float(robot_y - horizontal_distance), float(robot_z - vertical_distance)); */
-/*   const octomap::point3d p_max = */
-/*       octomap::point3d(float(robot_x + horizontal_distance), float(robot_y + horizontal_distance), float(robot_z + vertical_distance)); */
-
-/*   success = copyInsideBBX2(octree_, octree, p_min, p_max); */
-
-/*   octree->setProbHit(octree->getProbHit()); */
-/*   octree->setProbMiss(octree->getProbMiss()); */
-/*   octree->setClampingThresMin(octree->getClampingThresMinLog()); */
-/*   octree->setClampingThresMax(octree->getClampingThresMaxLog()); */
-
-/*   { */
-/*     std::scoped_lock lock(mutex_time_local_map_processing_); */
-
-/*     ros::Time time_end = ros::Time::now(); */
-
-/*     time_last_local_map_processing_ = (time_end - time_start).toSec(); */
-
-/*     if (time_last_local_map_processing_ > ((1.0 / _local_map_publisher_rate_) * _local_map_max_computation_duty_cycle_)) { */
-/*       ROS_ERROR_THROTTLE(5.0, "[OctomapServer]: local map creation time = %.3f sec", time_last_local_map_processing_); */
-/*     } else { */
-/*       ROS_WARN_THROTTLE(5.0, "[OctomapServer]: local map creation time = %.3f sec", time_last_local_map_processing_); */
-/*     } */
-/*   } */
-
-/*   return success; */
-/* } */
 
 //}
 

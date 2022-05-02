@@ -13,7 +13,7 @@ persistency:
 
   map_name: "default"
 
-  # save mapevery "n" seconds, will be save only when flying_normally == true
+  # save global map every "n" seconds, will be save only when flying_normally == true
   save_time: 10.0 # [s]
 
   # automatically aligns altitude after start
@@ -47,7 +47,7 @@ local_map:
 global_map:
 
   # should create a global map from the local map?
-  enabled: true
+  enabled: false
 
   # the publisher rate of the global map
   publisher_rate: 1.0 # [Hz]
