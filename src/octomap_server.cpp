@@ -518,7 +518,7 @@ void OctomapServer::onInit() {
 
   transformer_ = std::make_unique<mrs_lib::Transformer>("OctomapServer");
   transformer_->setDefaultPrefix(_uav_name_);
-  transformer_->setLookupTimeout(ros::Duration(0.2));
+  transformer_->setLookupTimeout(ros::Duration(0.5));
   transformer_->retryLookupNewest(false);
 
   //}
@@ -1302,25 +1302,25 @@ void OctomapServer::timerLocalMapResizer([[maybe_unused]] const ros::TimerEvent&
   {
     std::scoped_lock lock(mutex_local_map_dimensions_);
 
-    if (local_map_duty > 0.9) {
-      local_map_width_ -= int(ceil(10.0 * (local_map_duty - 0.9)));
-      local_map_height_ -= int(ceil(10.0 * (local_map_duty - 0.9)));
-    } else if (local_map_duty < 0.8) {
-      local_map_width_++;
-      local_map_height_++;
-    }
+    /* if (local_map_duty > 0.9) { */
+    /*   local_map_width_ -= int(ceil(10.0 * (local_map_duty - 0.9))); */
+    /*   local_map_height_ -= int(ceil(10.0 * (local_map_duty - 0.9))); */
+    /* } else if (local_map_duty < 0.8) { */
+    /*   local_map_width_++; */
+    /*   local_map_height_++; */
+    /* } */
 
-    if (local_map_width_ < 5) {
-      local_map_width_ = 5;
-    } else if (local_map_width_ > _local_map_width_) {
-      local_map_width_ = _local_map_width_;
-    }
+    /* if (local_map_width_ < 5) { */
+    /*   local_map_width_ = 5; */
+    /* } else if (local_map_width_ > _local_map_width_) { */
+    /*   local_map_width_ = _local_map_width_; */
+    /* } */
 
-    if (local_map_height_ < 5) {
-      local_map_height_ = 5;
-    } else if (local_map_height_ > _local_map_height_) {
-      local_map_height_ = _local_map_height_;
-    }
+    /* if (local_map_height_ < 5) { */
+    /*   local_map_height_ = 5; */
+    /* } else if (local_map_height_ > _local_map_height_) { */
+    /*   local_map_height_ = _local_map_height_; */
+    /* } */
 
     local_map_duty = 0;
   }
