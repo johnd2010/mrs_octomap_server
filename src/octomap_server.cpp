@@ -1122,7 +1122,7 @@ void OctomapServer::timerGlobalMapPublisher([[maybe_unused]] const ros::TimerEve
   {
     std::scoped_lock lock(mutex_octree_global_);
 
-    octree_global_->size();
+    octomap_size = octree_global_->size();
   }
 
   if (octomap_size <= 1) {
