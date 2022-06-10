@@ -1117,16 +1117,22 @@ void OctomapServer::timerGlobalMapPublisher([[maybe_unused]] const ros::TimerEve
 
   ROS_INFO_ONCE("[OctomapServer]: full map publisher timer spinning");
 
-  size_t octomap_size = octree_global_->size();
+  size_t octomap_size;
+
+  {
+    std::scoped_lock lock(mutex_octree_global_);
+
+    octree_global_->size();
+  }
 
   if (octomap_size <= 1) {
     ROS_WARN("[%s]: Nothing to publish, octree is empty", ros::this_node::getName().c_str());
     return;
   }
 
-  if (_global_map_compress_) {
-    octree_global_->prune();
-  }
+  /* if (_global_map_compress_) { */
+  /*   octree_global_->prune(); */
+  /* } */
 
   if (pub_map_global_full_) {
 
