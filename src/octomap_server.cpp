@@ -1473,9 +1473,9 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
       octomap::KeyRay::iterator alterantive_ray_end = keyRay.end();
 
-      for (octomap::KeyRay::iterator it2 = keyRay.begin(), end = keyRay.end(); it2 != end; ++it2) {
+      if (!_unknown_rays_clear_occupied_) {
 
-        if (!_unknown_rays_clear_occupied_) {
+        for (octomap::KeyRay::iterator it2 = keyRay.begin(), end = keyRay.end(); it2 != end; ++it2) {
 
           // check if the cell is occupied in the map
           auto node = octree_local_->search(*it2);
@@ -1505,19 +1505,23 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
     octomap::KeyRay key_ray;
     if (octree_local_->computeRayKeys(sensor_origin, coords, key_ray)) {
 
+      octomap::KeyRay::iterator alterantive_ray_end = key_ray.end();
+
       for (octomap::KeyRay::iterator it2 = key_ray.begin(), end = key_ray.end(); it2 != end; ++it2) {
 
         if (occupied_cells.count(*it2)) {
 
-          octomap::KeyRay::iterator last_key = it2 != key_ray.begin() ? it2 - 1 : key_ray.begin();
+          if (it2 == key_ray.begin()) {
+            alterantive_ray_end = key_ray.begin();  // special case
+          } else {
+            alterantive_ray_end = it2 - 1;
+          }
 
-          free_cells.insert(key_ray.begin(), last_key);
           break;
-
-        } else {
-          free_cells.insert(key_ray.begin(), key_ray.end());
         }
       }
+
+      free_cells.insert(key_ray.begin(), alterantive_ray_end);
     }
   }
 
@@ -1527,7 +1531,7 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
   if (!got_root) {
     octomap::OcTreeKey key = octree_local_->coordToKey(0, 0, 0, octree_local_->getTreeDepth());
-    octree_local_->setNodeValue(key, 0.0);
+    octree_local_->setNodeValue(key, 1.0);
   }
 
   // FREE CELLS
@@ -1541,6 +1545,9 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
     octree_local_->updateNode(*it, octree_local_->getProbHitLog());
   }
+
+  /* octomap::OcTreeKey robot_key = octree_local_->coordToKey(robotOriginTf.x, robotOriginTf.y, robotOriginTf.z); */
+  /* octree_local_->updateNode(robot_key, false); */
 
   // CROP THE MAP AROUND THE ROBOT
   {
@@ -1814,7 +1821,7 @@ bool OctomapServer::copyInsideBBX2(std::shared_ptr<OcTree_t>& from, std::shared_
 
   if (!got_root) {
     octomap::OcTreeKey key = to->coordToKey(0, 0, 0, to->getTreeDepth());
-    to->setNodeValue(key, 0.0);
+    to->setNodeValue(key, 1.0);
   }
 
   for (OcTree_t::leaf_bbx_iterator it = from->begin_leafs_bbx(p_min, p_max, from->getTreeDepth()), end = from->end_leafs_bbx(); it != end; ++it) {
@@ -1841,7 +1848,7 @@ bool OctomapServer::copyLocalMap(std::shared_ptr<OcTree_t>& from, std::shared_pt
 
   if (!got_root) {
     octomap::OcTreeKey key = to->coordToKey(0, 0, 0, to->getTreeDepth());
-    to->setNodeValue(key, 0.0);
+    to->setNodeValue(key, 1.0);
   }
 
   for (OcTree_t::leaf_iterator it = from->begin_leafs(from->getTreeDepth()), end = from->end_leafs(); it != end; ++it) {
