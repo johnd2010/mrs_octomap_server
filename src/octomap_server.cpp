@@ -1824,7 +1824,7 @@ bool OctomapServer::copyInsideBBX2(std::shared_ptr<OcTree_t>& from, std::shared_
     to->setNodeValue(key, 1.0);
   }
 
-  for (OcTree_t::leaf_bbx_iterator it = from->begin_leafs_bbx(p_min, p_max, from->getTreeDepth()), end = from->end_leafs_bbx(); it != end; ++it) {
+  for (OcTree_t::leaf_bbx_iterator it = from->begin_leafs_bbx(p_min, p_max), end = from->end_leafs_bbx(); it != end; ++it) {
 
     octomap::OcTreeKey   k    = it.getKey();
     octomap::OcTreeNode* node = touchNode(to, k, it.getDepth());
@@ -1851,7 +1851,7 @@ bool OctomapServer::copyLocalMap(std::shared_ptr<OcTree_t>& from, std::shared_pt
     to->setNodeValue(key, 1.0);
   }
 
-  for (OcTree_t::leaf_iterator it = from->begin_leafs(from->getTreeDepth()), end = from->end_leafs(); it != end; ++it) {
+  for (OcTree_t::leaf_iterator it = from->begin_leafs(), end = from->end_leafs(); it != end; ++it) {
 
     octomap::OcTreeKey   k    = it.getKey();
     octomap::OcTreeNode* node = touchNode(to, k, it.getDepth());
