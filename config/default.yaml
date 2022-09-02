@@ -66,15 +66,15 @@ sensor_params:
 
   3d_lidar:
 
-    n_sensors: 0
+    n_sensors: 1
 
-    # sensor_0:
+    sensor_0:
 
-    #   max_range: 20.0 # [m]
+      max_range: 20.0 # [m]
 
-    #   vertical_fov_angle: deg(90.0)
-    #   vertical_rays: 64
-    #   horizontal_rays: 64
+      vertical_fov_angle: deg(90.0)
+      vertical_rays: 128
+      horizontal_rays: 128
 
   depth_camera:
 
