@@ -43,6 +43,8 @@
 #include <mrs_lib/mutex.h>
 #include <mrs_lib/scope_timer.h>
 
+#include <octomap_tools/octomap_methods.h>
+
 #include <mrs_msgs/String.h>
 #include <mrs_msgs/ControlManagerDiagnostics.h>
 #include <mrs_msgs/Float64Stamped.h>
@@ -58,8 +60,6 @@
 #include <cmath>
 
 //}
-
-namespace ph = std::placeholders;
 
 namespace mrs_octomap_server
 {
@@ -133,8 +133,6 @@ public:
 
   bool callbackResetMap(std_srvs::Empty::Request& req, std_srvs::Empty::Response& resp);
 
-  bool callbackSetFractor([[maybe_unused]] mrs_msgs::SetInt::Request& req, [[maybe_unused]] mrs_msgs::SetInt::Response& resp);
-
   void callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>& wrp, const SensorType_t sensor_type, const int sensor_id);
   void callbackLaserScan(mrs_lib::SubscribeHandler<sensor_msgs::LaserScan>& wrp);
   void callbackCameraInfo(mrs_lib::SubscribeHandler<sensor_msgs::CameraInfo>& wrp);
@@ -169,16 +167,22 @@ private:
   ros::ServiceServer ss_reset_map_;
   ros::ServiceServer ss_save_map_;
   ros::ServiceServer ss_load_map_;
-  ros::ServiceServer ss_set_fractor_;
 
   // | ------------------------- timers ------------------------- |
 
-  ros::Timer timer_global_map_;
-  double     _global_map_rate_;
-  void       timerGlobalMap([[maybe_unused]] const ros::TimerEvent& event);
+  ros::Timer timer_global_map_publisher_;
+  double     _global_map_publisher_rate_;
+  void       timerGlobalMapPublisher([[maybe_unused]] const ros::TimerEvent& event);
 
-  ros::Timer timer_local_map_;
-  void       timerLocalMap([[maybe_unused]] const ros::TimerEvent& event);
+  ros::Timer timer_global_map_creator_;
+  double     _global_map_creator_rate_;
+  void       timerGlobalMapCreator([[maybe_unused]] const ros::TimerEvent& event);
+
+  ros::Timer timer_local_map_publisher_;
+  void       timerLocalMapPublisher([[maybe_unused]] const ros::TimerEvent& event);
+
+  ros::Timer timer_local_map_resizer_;
+  void       timerLocalMapResizer([[maybe_unused]] const ros::TimerEvent& event);
 
   ros::Timer timer_persistency_;
   void       timerPersistency([[maybe_unused]] const ros::TimerEvent& event);
@@ -191,6 +195,8 @@ private:
   bool        _simulation_;
   std::string _uav_name_;
 
+  bool _scope_timer_enabled_;
+
   double _robot_height_;
 
   bool        _persistency_enabled_;
@@ -202,28 +208,28 @@ private:
 
   bool _global_map_publish_full_;
   bool _global_map_publish_binary_;
+  bool _global_map_enabled_;
 
   bool _map_while_grounded_;
 
-  double _local_map_size_;
-  bool   _local_map_enabled_;
-  bool   _local_map_publish_full_;
-  bool   _local_map_publish_binary_;
+  bool _local_map_publish_full_;
+  bool _local_map_publish_binary_;
 
-  mrs_lib::Transformer transformer_;
+  std::unique_ptr<mrs_lib::Transformer> transformer_;
 
-  std::shared_ptr<OcTree_t> octree_;
-  std::mutex                mutex_octree_;
-  std::atomic<bool>         octree_initialized_;
+  std::shared_ptr<OcTree_t> octree_global_;
+  std::mutex                mutex_octree_global_;
 
   std::shared_ptr<OcTree_t> octree_local_;
+  std::shared_ptr<OcTree_t> octree_local_0_;
+  std::shared_ptr<OcTree_t> octree_local_1_;
+  int                       octree_local_idx_ = 0;
   std::mutex                mutex_octree_local_;
+
+  std::atomic<bool> octrees_initialized_ = false;
 
   double     avg_time_cloud_insertion_ = 0;
   std::mutex mutex_avg_time_cloud_insertion_;
-
-  double     time_last_local_map_processing_ = 0;
-  std::mutex mutex_time_local_map_processing_;
 
   std::string _world_frame_;
   std::string _robot_frame_;
@@ -231,24 +237,25 @@ private:
   bool        _global_map_compress_;
   std::string _map_path_;
 
-  double _local_map_horizontal_distance_;
-  double _local_map_vertical_distance_;
-  double _local_map_rate_;
-  double _local_map_max_computation_duty_cycle_;
+  int        _local_map_width_;
+  int        _local_map_height_;
+  int        local_map_width_;
+  int        local_map_height_;
+  std::mutex mutex_local_map_dimensions_;
+  double     _local_map_publisher_rate_;
 
-  double local_map_horizontal_offset_ = 0;
-  double local_map_vertical_offset_   = 0;
+  double     local_map_duty_ = 0;
+  std::mutex mutex_local_map_duty_;
 
   bool   _unknown_rays_update_free_space_;
   bool   _unknown_rays_clear_occupied_;
   double _unknown_rays_distance_;
 
-  int        resolution_fractor_;
-  std::mutex mutex_resolution_fractor_;
-
   laser_geometry::LaserProjection projector_;
 
   bool copyInsideBBX2(std::shared_ptr<OcTree_t>& from, std::shared_ptr<OcTree_t>& to, const octomap::point3d& p_min, const octomap::point3d& p_max);
+
+  bool copyLocalMap(std::shared_ptr<OcTree_t>& from, std::shared_ptr<OcTree_t>& to);
 
   octomap::OcTreeNode* touchNodeRecurs(std::shared_ptr<OcTree_t>& octree, octomap::OcTreeNode* node, const octomap::OcTreeKey& key, unsigned int depth,
                                        unsigned int max_depth);
@@ -267,6 +274,9 @@ private:
 
   void initialize3DLidarLUT(xyz_lut_t& lut, const SensorParams3DLidar_t sensor_params);
   void initializeDepthCamLUT(xyz_lut_t& lut, const SensorParamsDepthCam_t sensor_params);
+
+  bool                                       scope_timer_enabled_ = false;
+  std::shared_ptr<mrs_lib::ScopeTimerLogger> scope_timer_logger_;
 
   int n_sensors_2d_lidar_;
   int n_sensors_3d_lidar_;
@@ -312,6 +322,8 @@ void OctomapServer::onInit() {
   param_loader.loadParam("simulation", _simulation_);
   param_loader.loadParam("uav_name", _uav_name_);
 
+  param_loader.loadParam("scope_timer/enabled", _scope_timer_enabled_);
+
   param_loader.loadParam("map_while_grounded", _map_while_grounded_);
 
   param_loader.loadParam("persistency/enabled", _persistency_enabled_);
@@ -321,21 +333,23 @@ void OctomapServer::onInit() {
   param_loader.loadParam("persistency/align_altitude/ground_detection_distance", _persistency_align_altitude_distance_);
   param_loader.loadParam("persistency/align_altitude/robot_height", _robot_height_);
 
-  param_loader.loadParam("global_map/rate", _global_map_rate_);
+  param_loader.loadParam("global_map/publisher_rate", _global_map_publisher_rate_);
+  param_loader.loadParam("global_map/creation_rate", _global_map_creator_rate_);
+  param_loader.loadParam("global_map/enabled", _global_map_enabled_);
   param_loader.loadParam("global_map/compress", _global_map_compress_);
   param_loader.loadParam("global_map/publish_full", _global_map_publish_full_);
   param_loader.loadParam("global_map/publish_binary", _global_map_publish_binary_);
 
-  param_loader.loadParam("local_map/enabled", _local_map_enabled_);
-  param_loader.loadParam("local_map/horizontal_distance", _local_map_horizontal_distance_);
-  param_loader.loadParam("local_map/vertical_distance", _local_map_vertical_distance_);
-  param_loader.loadParam("local_map/rate", _local_map_rate_);
-  param_loader.loadParam("local_map/max_computation_duty_cycle", _local_map_max_computation_duty_cycle_);
+  param_loader.loadParam("local_map/size/width", _local_map_width_);
+  param_loader.loadParam("local_map/size/height", _local_map_height_);
+  param_loader.loadParam("local_map/publisher_rate", _local_map_publisher_rate_);
   param_loader.loadParam("local_map/publish_full", _local_map_publish_full_);
   param_loader.loadParam("local_map/publish_binary", _local_map_publish_binary_);
 
-  param_loader.loadParam("mapping/resolution", octree_resolution_);
-  param_loader.loadParam("mapping/initial_fractor", resolution_fractor_);
+  local_map_width_  = _local_map_width_;
+  local_map_height_ = _local_map_height_;
+
+  param_loader.loadParam("resolution", octree_resolution_);
   param_loader.loadParam("world_frame_id", _world_frame_);
   param_loader.loadParam("robot_frame_id", _robot_frame_);
 
@@ -453,17 +467,25 @@ void OctomapServer::onInit() {
 
   /* initialize octomap object & params //{ */
 
-  octree_ = std::make_shared<OcTree_t>(octree_resolution_);
-  octree_->setProbHit(_probHit_);
-  octree_->setProbMiss(_probMiss_);
-  octree_->setClampingThresMin(_thresMin_);
-  octree_->setClampingThresMax(_thresMax_);
+  octree_global_ = std::make_shared<OcTree_t>(octree_resolution_);
+  octree_global_->setProbHit(_probHit_);
+  octree_global_->setProbMiss(_probMiss_);
+  octree_global_->setClampingThresMin(_thresMin_);
+  octree_global_->setClampingThresMax(_thresMax_);
 
-  octree_local_ = std::make_shared<OcTree_t>(octree_resolution_);
-  octree_local_->setProbHit(_probHit_);
-  octree_local_->setProbMiss(_probMiss_);
-  octree_local_->setClampingThresMin(_thresMin_);
-  octree_local_->setClampingThresMax(_thresMax_);
+  octree_local_0_ = std::make_shared<OcTree_t>(octree_resolution_);
+  octree_local_0_->setProbHit(_probHit_);
+  octree_local_0_->setProbMiss(_probMiss_);
+  octree_local_0_->setClampingThresMin(_thresMin_);
+  octree_local_0_->setClampingThresMax(_thresMax_);
+
+  octree_local_1_ = std::make_shared<OcTree_t>(octree_resolution_);
+  octree_local_1_->setProbHit(_probHit_);
+  octree_local_1_->setProbMiss(_probMiss_);
+  octree_local_1_->setClampingThresMin(_thresMin_);
+  octree_local_1_->setClampingThresMax(_thresMax_);
+
+  octree_local_ = octree_local_0_;
 
   if (_persistency_enabled_) {
     bool success = loadFromFile(_persistency_map_name_);
@@ -479,16 +501,19 @@ void OctomapServer::onInit() {
   }
 
   if (_persistency_enabled_ && _persistency_align_altitude_enabled_) {
-    octree_initialized_ = false;
+    octrees_initialized_ = false;
   } else {
-    octree_initialized_ = true;
+    octrees_initialized_ = true;
   }
 
   //}
 
   /* transformer //{ */
 
-  transformer_ = mrs_lib::Transformer("OctomapServer", _uav_name_);
+  transformer_ = std::make_unique<mrs_lib::Transformer>("OctomapServer");
+  transformer_->setDefaultPrefix(_uav_name_);
+  transformer_->setLookupTimeout(ros::Duration(0.5));
+  transformer_->retryLookupNewest(false);
 
   //}
 
@@ -541,20 +566,22 @@ void OctomapServer::onInit() {
 
   /* service servers //{ */
 
-  ss_reset_map_   = nh_.advertiseService("reset_map_in", &OctomapServer::callbackResetMap, this);
-  ss_save_map_    = nh_.advertiseService("save_map_in", &OctomapServer::callbackSaveMap, this);
-  ss_load_map_    = nh_.advertiseService("load_map_in", &OctomapServer::callbackLoadMap, this);
-  ss_set_fractor_ = nh_.advertiseService("set_fractor_in", &OctomapServer::callbackSetFractor, this);
+  ss_reset_map_ = nh_.advertiseService("reset_map_in", &OctomapServer::callbackResetMap, this);
+  ss_save_map_  = nh_.advertiseService("save_map_in", &OctomapServer::callbackSaveMap, this);
+  ss_load_map_  = nh_.advertiseService("load_map_in", &OctomapServer::callbackLoadMap, this);
 
   //}
 
   /* timers //{ */
 
-  timer_global_map_ = nh_.createTimer(ros::Rate(_global_map_rate_), &OctomapServer::timerGlobalMap, this);
-
-  if (_local_map_enabled_) {
-    timer_local_map_ = nh_.createTimer(ros::Rate(_local_map_rate_), &OctomapServer::timerLocalMap, this);
+  if (_global_map_enabled_) {
+    timer_global_map_publisher_ = nh_.createTimer(ros::Rate(_global_map_publisher_rate_), &OctomapServer::timerGlobalMapPublisher, this);
+    timer_global_map_creator_   = nh_.createTimer(ros::Rate(_global_map_creator_rate_), &OctomapServer::timerGlobalMapCreator, this);
   }
+
+  timer_local_map_publisher_ = nh_.createTimer(ros::Rate(_local_map_publisher_rate_), &OctomapServer::timerLocalMapPublisher, this);
+
+  timer_local_map_resizer_ = nh_.createTimer(ros::Rate(1.0), &OctomapServer::timerLocalMapResizer, this);
 
   if (_persistency_enabled_) {
     timer_persistency_ = nh_.createTimer(ros::Rate(1.0 / _persistency_save_time_), &OctomapServer::timerPersistency, this);
@@ -566,7 +593,12 @@ void OctomapServer::onInit() {
 
   //}
 
-  time_last_local_map_processing_ = (1.0 / _local_map_rate_) * _local_map_max_computation_duty_cycle_;
+  /* scope timer logger //{ */
+
+  const std::string scope_timer_log_filename = param_loader.loadParam2("scope_timer/log_filename", std::string(""));
+  scope_timer_logger_                        = std::make_shared<mrs_lib::ScopeTimerLogger>(scope_timer_log_filename, scope_timer_enabled_);
+
+  //}
 
   is_initialized_ = true;
 
@@ -606,7 +638,7 @@ void OctomapServer::callbackCameraInfo(mrs_lib::SubscribeHandler<sensor_msgs::Ca
   camera_info_processed_ = true;
 }
 
-/* insertLaserScanCallback() //{ */
+/* callbackLaserScan() //{ */
 
 void OctomapServer::callbackLaserScan(mrs_lib::SubscribeHandler<sensor_msgs::LaserScan>& wrp) {
 
@@ -614,7 +646,7 @@ void OctomapServer::callbackLaserScan(mrs_lib::SubscribeHandler<sensor_msgs::Las
     return;
   }
 
-  if (!octree_initialized_) {
+  if (!octrees_initialized_) {
     return;
   }
 
@@ -650,14 +682,14 @@ void OctomapServer::callbackLaserScan(mrs_lib::SubscribeHandler<sensor_msgs::Las
   Eigen::Matrix4f                 sensorToWorld;
   geometry_msgs::TransformStamped sensorToWorldTf;
 
-  auto res = transformer_.getTransform(scan->header.frame_id, _world_frame_, scan->header.stamp);
+  auto res = transformer_->getTransform(scan->header.frame_id, _world_frame_, scan->header.stamp);
 
   if (!res) {
     ROS_WARN_THROTTLE(1.0, "[OctomapServer]: insertLaserScanCallback(): could not find tf from %s to %s", scan->header.frame_id.c_str(), _world_frame_.c_str());
     return;
   }
 
-  pcl_ros::transformAsMatrix(res.value().getTransform().transform, sensorToWorld);
+  pcl_ros::transformAsMatrix(res.value().transform, sensorToWorld);
 
   // laser scan to point cloud
   sensor_msgs::PointCloud2 ros_cloud;
@@ -710,7 +742,7 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
     return;
   }
 
-  if (!octree_initialized_) {
+  if (!octrees_initialized_) {
     return;
   }
 
@@ -752,7 +784,7 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
 
   pcl::fromROSMsg(*cloud, *pc);
 
-  auto res = transformer_.getTransform(cloud->header.frame_id, _world_frame_, cloud->header.stamp);
+  auto res = transformer_->getTransform(cloud->header.frame_id, _world_frame_, cloud->header.stamp);
 
   if (!res) {
     ROS_WARN_THROTTLE(1.0, "[OctomapServer]: callback3dLidarCloud2(): could not find tf from %s to %s", cloud->header.frame_id.c_str(), _world_frame_.c_str());
@@ -760,7 +792,7 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
   }
 
   Eigen::Matrix4f                 sensorToWorld;
-  geometry_msgs::TransformStamped sensorToWorldTf = res.value().getTransform();
+  geometry_msgs::TransformStamped sensorToWorldTf = res.value();
   pcl_ros::transformAsMatrix(sensorToWorldTf.transform, sensorToWorld);
 
   double max_range;
@@ -804,6 +836,11 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
 
       break;
     }
+
+    default: {
+
+      break;
+    }
   }
 
   for (int i = 0; i < pc->size(); i++) {
@@ -836,6 +873,11 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
             std::scoped_lock lock(mutex_lut_);
 
             ray_vec = sensor_depth_camera_xyz_lut_[sensor_id].directions.col(i);
+
+            break;
+          }
+
+          default: {
 
             break;
           }
@@ -944,7 +986,7 @@ bool OctomapServer::callbackLoadMap([[maybe_unused]] mrs_msgs::String::Request& 
   if (success) {
 
     if (_persistency_enabled_ && _persistency_align_altitude_enabled_) {
-      octree_initialized_ = false;
+      octrees_initialized_ = false;
 
       timer_altitude_alignment_.start();
     }
@@ -994,12 +1036,13 @@ bool OctomapServer::callbackSaveMap([[maybe_unused]] mrs_msgs::String::Request& 
 bool OctomapServer::callbackResetMap([[maybe_unused]] std_srvs::Empty::Request& req, [[maybe_unused]] std_srvs::Empty::Response& resp) {
 
   {
-    std::scoped_lock lock(mutex_octree_);
+    std::scoped_lock lock(mutex_octree_global_, mutex_octree_local_);
 
-    octree_->clear();
-
-    octree_initialized_ = true;
+    octree_global_->clear();
+    octree_local_->clear();
   }
+
+  octrees_initialized_ = true;
 
   ROS_INFO("[OctomapServer]: octomap cleared");
 
@@ -1008,84 +1051,38 @@ bool OctomapServer::callbackResetMap([[maybe_unused]] std_srvs::Empty::Request& 
 
 //}
 
-/* callbackSetFractor() //{ */
-
-bool OctomapServer::callbackSetFractor([[maybe_unused]] mrs_msgs::SetInt::Request& req, [[maybe_unused]] mrs_msgs::SetInt::Response& resp) {
-
-  if (!is_initialized_) {
-    return false;
-  }
-
-  std::stringstream ss;
-
-  if (req.value < 0) {
-
-    ss << "fractore < 0 does not make sense!";
-    ROS_ERROR_STREAM_THROTTLE(1.0, "[OctomapServer]: " << ss.str());
-
-    resp.message = ss.str();
-    resp.success = false;
-
-    return true;
-  }
-
-  {
-    std::scoped_lock lock(mutex_resolution_fractor_);
-
-    resolution_fractor_ = req.value;
-  }
-
-  {
-    std::scoped_lock lock(mutex_octree_);
-
-    for (OcTree_t::leaf_iterator it = octree_->begin_leafs(octree_->getTreeDepth() - req.value), end = octree_->end_leafs(); it != end; ++it) {
-
-      auto orig_key = it.getKey();
-
-      const unsigned int old_depth = it.getDepth();
-
-      octomap::OcTreeNode* orig_node = it.getNode();
-
-      octree_->eatChildren(orig_node);
-    }
-  }
-
-  resp.message = "fractor set";
-  resp.success = true;
-
-  return true;
-}
-
-//}
-
 // | ------------------------- timers ------------------------- |
 
-/* timerGlobalMap() //{ */
+/* timerGlobalMapPublisher() //{ */
 
-void OctomapServer::timerGlobalMap([[maybe_unused]] const ros::TimerEvent& evt) {
+void OctomapServer::timerGlobalMapPublisher([[maybe_unused]] const ros::TimerEvent& evt) {
 
   if (!is_initialized_) {
     return;
   }
 
-  if (!octree_initialized_) {
+  if (!octrees_initialized_) {
     return;
   }
 
-  ROS_INFO_ONCE("[OctomapServer]: full map timer spinning");
+  ROS_INFO_ONCE("[OctomapServer]: full map publisher timer spinning");
 
-  std::scoped_lock lock(mutex_octree_);
+  size_t octomap_size;
 
-  size_t octomap_size = octree_->size();
+  {
+    std::scoped_lock lock(mutex_octree_global_);
+
+    octomap_size = octree_global_->size();
+  }
 
   if (octomap_size <= 1) {
     ROS_WARN("[%s]: Nothing to publish, octree is empty", ros::this_node::getName().c_str());
     return;
   }
 
-  if (_global_map_compress_) {
-    octree_->prune();
-  }
+  /* if (_global_map_compress_) { */
+  /*   octree_global_->prune(); */
+  /* } */
 
   if (pub_map_global_full_) {
 
@@ -1093,7 +1090,17 @@ void OctomapServer::timerGlobalMap([[maybe_unused]] const ros::TimerEvent& evt) 
     map.header.frame_id = _world_frame_;
     map.header.stamp    = ros::Time::now();  // TODO
 
-    if (octomap_msgs::fullMapToMsg(*octree_, map)) {
+    bool success = false;
+
+    {
+      std::scoped_lock lock(mutex_octree_global_);
+
+      mrs_lib::ScopeTimer timer = mrs_lib::ScopeTimer("OctomapServer::globalMapFullPublish", scope_timer_logger_, _scope_timer_enabled_);
+
+      success = octomap_msgs::fullMapToMsg(*octree_global_, map);
+    }
+
+    if (success) {
       pub_map_global_full_.publish(map);
     } else {
       ROS_ERROR("[OctomapServer]: error serializing global octomap to full representation");
@@ -1106,7 +1113,17 @@ void OctomapServer::timerGlobalMap([[maybe_unused]] const ros::TimerEvent& evt) 
     map.header.frame_id = _world_frame_;
     map.header.stamp    = ros::Time::now();  // TODO
 
-    if (octomap_msgs::binaryMapToMsg(*octree_, map)) {
+    bool success = false;
+
+    {
+      std::scoped_lock lock(mutex_octree_global_);
+
+      mrs_lib::ScopeTimer timer = mrs_lib::ScopeTimer("OctomapServer::globalMapBinaryPublish", scope_timer_logger_, _scope_timer_enabled_);
+
+      success = octomap_msgs::binaryMapToMsg(*octree_global_, map);
+    }
+
+    if (success) {
       pub_map_global_binary_.publish(map);
     } else {
       ROS_ERROR("[OctomapServer]: error serializing global octomap to binary representation");
@@ -1116,99 +1133,157 @@ void OctomapServer::timerGlobalMap([[maybe_unused]] const ros::TimerEvent& evt) 
 
 //}
 
-/* timerLocalMap() //{ */
+/* timerGlobalMapCreator() //{ */
 
-void OctomapServer::timerLocalMap([[maybe_unused]] const ros::TimerEvent& evt) {
+void OctomapServer::timerGlobalMapCreator([[maybe_unused]] const ros::TimerEvent& evt) {
 
   if (!is_initialized_) {
     return;
   }
 
-  if (!octree_initialized_) {
+  if (!octrees_initialized_) {
     return;
   }
 
-  ROS_INFO_ONCE("[OctomapServer]: local map timer spinning");
+  mrs_lib::ScopeTimer timer = mrs_lib::ScopeTimer("OctomapServer::timerGlobalMapCreator", scope_timer_logger_, _scope_timer_enabled_);
 
-  std::scoped_lock lock(mutex_octree_local_);
+  ROS_INFO_ONCE("[OctomapServer]: global map creator timer spinning");
 
-  auto time_local_map_processing = mrs_lib::get_mutexed(mutex_time_local_map_processing_, time_last_local_map_processing_);
+  // copy the local map into a buffer
 
-  double duty_factor = time_last_local_map_processing_ / (_local_map_max_computation_duty_cycle_ * (1.0 / _local_map_rate_));
+  std::shared_ptr<OcTree_t> local_map_tmp_;
+  {
+    std::scoped_lock lock(mutex_octree_local_);
 
-  if (duty_factor >= 1.0) {
-
-    local_map_horizontal_offset_ -= 0.5;
-    local_map_vertical_offset_ -= 0.25;
-
-  } else if (duty_factor <= 0.5) {
-
-    local_map_horizontal_offset_ += 0.5;
-    local_map_vertical_offset_ += 0.25;
-
-    if (local_map_vertical_offset_ >= 0) {
-      local_map_horizontal_offset_ = 0;
-    }
-
-    if (local_map_vertical_offset_ >= 0) {
-      local_map_vertical_offset_ = 0;
-    }
+    local_map_tmp_ = std::make_shared<OcTree_t>(*octree_local_);
   }
 
-  double horizontal_distance = _local_map_horizontal_distance_ + local_map_horizontal_offset_;
-  double vertical_distance   = _local_map_vertical_distance_ + local_map_vertical_offset_;
+  {
+    std::scoped_lock lock(mutex_octree_global_);
 
-  if (horizontal_distance < 10) {
-    horizontal_distance = 10;
-    ROS_ERROR_THROTTLE(1.0, "[OctomapServer]: saturating local map size to 10, your computer is probably not very powerfull");
+    copyLocalMap(local_map_tmp_, octree_global_);
   }
+}
 
-  if (vertical_distance < 5) {
-    vertical_distance = 5;
-    ROS_ERROR_THROTTLE(1.0, "[OctomapServer]: saturating local map vertical size to 5, your computer is probably not very powerfull");
-  }
+//}
 
-  ROS_INFO_THROTTLE(5.0, "[OctomapServer]: local map size: hor %d, ver %d", int(horizontal_distance), int(vertical_distance));
+/* timerLocalMapPublisher() //{ */
 
-  bool success = createLocalMap(_robot_frame_, horizontal_distance, vertical_distance, octree_local_);
+void OctomapServer::timerLocalMapPublisher([[maybe_unused]] const ros::TimerEvent& evt) {
 
-  if (!success) {
-    ROS_WARN_THROTTLE(1.0, "[OctomapServer]: failed to create the local map");
+  if (!is_initialized_) {
     return;
   }
+
+  if (!octrees_initialized_) {
+    return;
+  }
+
+  ROS_INFO_ONCE("[OctomapServer]: local map publisher timer spinning");
 
   size_t octomap_size = octree_local_->size();
 
   if (octomap_size <= 1) {
-    ROS_WARN("[%s]: Nothing to publish, octree is empty", ros::this_node::getName().c_str());
+    ROS_WARN("[%s]: Nothing to publish, octree_local_, octree is empty", ros::this_node::getName().c_str());
     return;
   }
 
-  if (pub_map_global_full_) {
+  if (_local_map_publish_full_) {
 
     octomap_msgs::Octomap map;
     map.header.frame_id = _world_frame_;
     map.header.stamp    = ros::Time::now();  // TODO
 
-    if (octomap_msgs::fullMapToMsg(*octree_local_, map)) {
+    bool success = false;
+
+    {
+      std::scoped_lock lock(mutex_octree_local_);
+
+      mrs_lib::ScopeTimer timer = mrs_lib::ScopeTimer("OctomapServer::localMapFullPublish", scope_timer_logger_, _scope_timer_enabled_);
+
+      success = octomap_msgs::fullMapToMsg(*octree_local_, map);
+    }
+
+    if (success) {
       pub_map_local_full_.publish(map);
     } else {
       ROS_ERROR("[OctomapServer]: error serializing local octomap to full representation");
     }
   }
 
-  if (_global_map_publish_binary_) {
+  if (_local_map_publish_binary_) {
 
     octomap_msgs::Octomap map;
     map.header.frame_id = _world_frame_;
     map.header.stamp    = ros::Time::now();  // TODO
 
-    if (octomap_msgs::binaryMapToMsg(*octree_local_, map)) {
+    bool success = false;
+
+    {
+      std::scoped_lock lock(mutex_octree_local_);
+
+      mrs_lib::ScopeTimer timer = mrs_lib::ScopeTimer("OctomapServer::localMapBinaryPublish", scope_timer_logger_, _scope_timer_enabled_);
+
+      success = octomap_msgs::binaryMapToMsg(*octree_local_, map);
+    }
+
+    if (success) {
       pub_map_local_binary_.publish(map);
     } else {
       ROS_ERROR("[OctomapServer]: error serializing local octomap to binary representation");
     }
   }
+}
+
+//}
+
+/* timerLocalMapResizer() //{ */
+
+void OctomapServer::timerLocalMapResizer([[maybe_unused]] const ros::TimerEvent& evt) {
+
+  if (!is_initialized_) {
+    return;
+  }
+
+  if (!octrees_initialized_) {
+    return;
+  }
+
+  ROS_INFO_ONCE("[OctomapServer]: local map resizer timer spinning");
+
+  auto local_map_duty = mrs_lib::get_mutexed(mutex_local_map_duty_, local_map_duty_);
+
+  ROS_INFO("[OctomapServer]: local map duty time: %.3f s", local_map_duty);
+
+  {
+    std::scoped_lock lock(mutex_local_map_dimensions_);
+
+    if (local_map_duty > 0.9) {
+      local_map_width_ -= int(ceil(10.0 * (local_map_duty - 0.9)));
+      local_map_height_ -= int(ceil(10.0 * (local_map_duty - 0.9)));
+    } else if (local_map_duty < 0.8) {
+      local_map_width_++;
+      local_map_height_++;
+    }
+
+    if (local_map_width_ < 10) {
+      local_map_width_ = 10;
+    } else if (local_map_width_ > _local_map_width_) {
+      local_map_width_ = _local_map_width_;
+    }
+
+    if (local_map_height_ < 10) {
+      local_map_height_ = 10;
+    } else if (local_map_height_ > _local_map_height_) {
+      local_map_height_ = _local_map_height_;
+    }
+
+    local_map_duty = 0;
+  }
+
+  ROS_INFO("[OctomapServer]: local map size %d %d", local_map_width_, local_map_height_);
+
+  mrs_lib::set_mutexed(mutex_local_map_duty_, local_map_duty, local_map_duty_);
 }
 
 //}
@@ -1221,7 +1296,7 @@ void OctomapServer::timerPersistency([[maybe_unused]] const ros::TimerEvent& evt
     return;
   }
 
-  if (!octree_initialized_) {
+  if (!octrees_initialized_) {
     return;
   }
 
@@ -1313,12 +1388,13 @@ void OctomapServer::timerAltitudeAlignment([[maybe_unused]] const ros::TimerEven
       ROS_INFO("[OctomapServer]: already in the air while missing height data, skipping alignment and clearing the map");
 
       {
-        std::scoped_lock lock(mutex_octree_);
+        std::scoped_lock lock(mutex_octree_global_, mutex_octree_local_);
 
-        octree_->clear();
+        octree_global_->clear();
+        octree_local_->clear();
+
+        octrees_initialized_ = true;
       }
-
-      octree_initialized_ = true;
 
       timer_altitude_alignment_.stop();
 
@@ -1335,13 +1411,13 @@ void OctomapServer::timerAltitudeAlignment([[maybe_unused]] const ros::TimerEven
 
   // | ------ get the current UAV position in the map frame ----- |
 
-  auto res = transformer_.getTransform(_robot_frame_, _world_frame_);
+  auto res = transformer_->getTransform(_robot_frame_, _world_frame_);
 
   double robot_x, robot_y, robot_z;
 
   if (res) {
 
-    geometry_msgs::TransformStamped world_to_robot = res.value().getTransform();
+    geometry_msgs::TransformStamped world_to_robot = res.value();
 
     robot_x = world_to_robot.transform.translation.x;
     robot_y = world_to_robot.transform.translation.y;
@@ -1355,19 +1431,20 @@ void OctomapServer::timerAltitudeAlignment([[maybe_unused]] const ros::TimerEven
     return;
   }
 
-  auto ground_z = getGroundZ(octree_, robot_x, robot_y);
+  auto ground_z = getGroundZ(octree_global_, robot_x, robot_y);
 
   if (!ground_z) {
 
     ROS_WARN_THROTTLE(1.0, "[OctomapServer]: could not calculate the Z of the ground below");
 
     {
-      std::scoped_lock lock(mutex_octree_);
+      std::scoped_lock lock(mutex_octree_global_, mutex_octree_local_);
 
-      octree_->clear();
+      octree_global_->clear();
+      octree_local_->clear();
+
+      octrees_initialized_ = true;
     }
-
-    octree_initialized_ = true;
 
     timer_altitude_alignment_.stop();
 
@@ -1381,7 +1458,7 @@ void OctomapServer::timerAltitudeAlignment([[maybe_unused]] const ros::TimerEven
   if (align_using_height) {
     ground_z_should_be = robot_z - sh_height_.getMsg()->value;
   } else {
-    ground_z_should_be = robot_z - _robot_height_ - 0.5 * octree_->getResolution();
+    ground_z_should_be = robot_z - _robot_height_ - 0.5 * octree_global_->getResolution();
   }
 
   double offset = ground_z_should_be - ground_z.value();
@@ -1390,9 +1467,10 @@ void OctomapServer::timerAltitudeAlignment([[maybe_unused]] const ros::TimerEven
   ROS_INFO("[OctomapServer]: ground should be at height %.2f m", ground_z_should_be);
   ROS_INFO("[OctomapServer]: shifting ground by %.2f m", offset);
 
-  translateMap(octree_, 0, 0, offset);
+  translateMap(octree_global_, 0, 0, offset);
+  translateMap(octree_local_, 0, 0, offset);
 
-  octree_initialized_ = true;
+  octrees_initialized_ = true;
 
   timer_altitude_alignment_.stop();
 }
@@ -1406,23 +1484,21 @@ void OctomapServer::timerAltitudeAlignment([[maybe_unused]] const ros::TimerEven
 void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginTf, const PCLPointCloud::ConstPtr& cloud,
                                      const PCLPointCloud::ConstPtr& free_vectors_cloud) {
 
-  std::scoped_lock lock(mutex_octree_);
+  mrs_lib::ScopeTimer timer = mrs_lib::ScopeTimer("OctomapServer::timerInsertPointCloud", scope_timer_logger_, _scope_timer_enabled_);
 
-  auto resolution_fractor = mrs_lib::get_mutexed(mutex_resolution_fractor_, resolution_fractor_);
+  ros::Time time_start = ros::Time::now();
+
+  std::scoped_lock lock(mutex_octree_local_);
+
+  auto [local_map_width, local_map_height] = mrs_lib::get_mutexed(mutex_local_map_dimensions_, local_map_width_, local_map_height_);
 
   const octomap::point3d sensor_origin = octomap::pointTfToOctomap(sensorOriginTf);
 
-  const float free_space_ray_len = float(_unknown_rays_distance_);
-
-  double coarse_res = octree_->getResolution() * pow(2.0, resolution_fractor);
-
-  ROS_INFO_THROTTLE(1.0, "[OctomapServer]: current resolution = %.2f m", coarse_res);
+  const float free_space_ray_len = std::min(float(_unknown_rays_distance_), float(sqrt(2 * pow(local_map_width / 2.0, 2) + pow(local_map_height / 2.0, 2))));
 
   octomap::KeySet occupied_cells;
   octomap::KeySet free_cells;
   octomap::KeySet free_ends;
-
-  const bool free_space_bounded = free_space_ray_len > 0.0f;
 
   // all measured points: make it free on ray, occupied on endpoint:
   for (PCLPointCloud::const_iterator it = cloud->begin(); it != cloud->end(); ++it) {
@@ -1435,18 +1511,19 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
     const float      point_distance = float((measured_point - sensor_origin).norm());
 
     octomap::OcTreeKey key;
-    if (octree_->coordToKeyChecked(measured_point, key)) {
+    if (octree_local_->coordToKeyChecked(measured_point, key)) {
       occupied_cells.insert(key);
     }
 
     // move end point to distance min(free space ray len, current distance)
     measured_point = sensor_origin + (measured_point - sensor_origin).normalize() * std::min(free_space_ray_len, point_distance);
 
-    octomap::OcTreeKey measured_key = octree_->coordToKey(measured_point);
+    octomap::OcTreeKey measured_key = octree_local_->coordToKey(measured_point);
 
     free_ends.insert(measured_key);
   }
 
+  // FREE VECTORS
   for (PCLPointCloud::const_iterator it = free_vectors_cloud->begin(); it != free_vectors_cloud->end(); ++it) {
 
     if (!(std::isfinite(it->x) && std::isfinite(it->y) && std::isfinite(it->z))) {
@@ -1454,21 +1531,26 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
     }
 
     octomap::point3d measured_point(it->x, it->y, it->z);
-    octomap::KeyRay  keyRay;
+    const float      point_distance = float((measured_point - sensor_origin).norm());
+
+    octomap::KeyRay keyRay;
+
+    // move end point to distance min(free space ray len, current distance)
+    measured_point = sensor_origin + (measured_point - sensor_origin).normalize() * std::min(free_space_ray_len, point_distance);
 
     // check if the ray intersects a cell in the occupied list
-    if (octree_->computeRayKeys(sensor_origin, measured_point, keyRay, resolution_fractor)) {
+    if (octree_local_->computeRayKeys(sensor_origin, measured_point, keyRay)) {
 
       octomap::KeyRay::iterator alterantive_ray_end = keyRay.end();
 
-      for (octomap::KeyRay::iterator it2 = keyRay.begin(), end = keyRay.end(); it2 != end; ++it2) {
+      if (!_unknown_rays_clear_occupied_) {
 
-        if (!_unknown_rays_clear_occupied_) {
+        for (octomap::KeyRay::iterator it2 = keyRay.begin(), end = keyRay.end(); it2 != end; ++it2) {
 
           // check if the cell is occupied in the map
-          auto node = octree_->search(*it2);
+          auto node = octree_local_->search(*it2);
 
-          if (node && octree_->isNodeOccupied(node)) {
+          if (node && octree_local_->isNodeOccupied(node)) {
 
             if (it2 == keyRay.begin()) {
               alterantive_ray_end = keyRay.begin();  // special case
@@ -1488,58 +1570,94 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
   // for FREE RAY ENDS
   for (octomap::KeySet::iterator it = free_ends.begin(), end = free_ends.end(); it != end; ++it) {
 
-    octomap::point3d coords = octree_->keyToCoord(*it);
+    octomap::point3d coords = octree_local_->keyToCoord(*it);
 
     octomap::KeyRay key_ray;
-    if (octree_->computeRayKeys(sensor_origin, coords, key_ray, resolution_fractor)) {
+    if (octree_local_->computeRayKeys(sensor_origin, coords, key_ray)) {
+
+      octomap::KeyRay::iterator alterantive_ray_end = key_ray.end();
 
       for (octomap::KeyRay::iterator it2 = key_ray.begin(), end = key_ray.end(); it2 != end; ++it2) {
 
         if (occupied_cells.count(*it2)) {
 
-          octomap::KeyRay::iterator last_key = it2 != key_ray.begin() ? it2 - 1 : key_ray.begin();
+          if (it2 == key_ray.begin()) {
+            alterantive_ray_end = key_ray.begin();  // special case
+          } else {
+            alterantive_ray_end = it2 - 1;
+          }
 
-          free_cells.insert(key_ray.begin(), last_key);
           break;
-
-        } else {
-          free_cells.insert(key_ray.begin(), key_ray.end());
         }
       }
+
+      free_cells.insert(key_ray.begin(), alterantive_ray_end);
     }
   }
 
-  octomap::OcTreeNode* root = octree_->getRoot();
+  octomap::OcTreeNode* root = octree_local_->getRoot();
 
   bool got_root = root ? true : false;
 
   if (!got_root) {
-    octomap::OcTreeKey key = octree_->coordToKey(0, 0, 0, octree_->getTreeDepth());
-    octree_->setNodeValue(key, 0.0);
+    octomap::OcTreeKey key = octree_local_->coordToKey(0, 0, 0, octree_local_->getTreeDepth());
+    octree_local_->setNodeValue(key, 1.0);
   }
 
   // FREE CELLS
   for (octomap::KeySet::iterator it = free_cells.begin(), end = free_cells.end(); it != end; ++it) {
 
-    /* auto coords = octree_->keyToCoord(*it); */
-
-    /* octomap::OcTreeNode* node = touchNode(octree_, *it, octree_->getTreeDepth() - resolution_fractor); */
-    /* octree_->updateNodeLogOdds(node, octree_->getProbMissLog()); */
-    /* octree_->setNodeValueDepth(*it,octree_->getProbMiss(), octree_->getTreeDepth() - resolution_fractor); */
-    octree_->updateNodeDepth(*it, octree_->getProbMissLog(), octree_->getTreeDepth() - resolution_fractor);
+    octree_local_->updateNode(*it, octree_local_->getProbMissLog());
   }
-
-  /* first_iter = true; */
 
   // OCCUPIED CELLS
   for (octomap::KeySet::iterator it = occupied_cells.begin(), end = occupied_cells.end(); it != end; it++) {
 
-    /* auto coords = octree_->keyToCoord(*it); */
+    octree_local_->updateNode(*it, octree_local_->getProbHitLog());
+  }
 
-    /* octomap::OcTreeNode* node = touchNode(octree_, *it, octree_->getTreeDepth() - resolution_fractor); */
-    /* octree_->updateNodeLogOdds(node, octree_->getProbHitLog()); */
-    /* octree_->setNodeValueDepth(*it, octree_->getProbHit(), octree_->getTreeDepth() - resolution_fractor); */
-    octree_->updateNodeDepth(*it, octree_->getProbHitLog(), octree_->getTreeDepth() - resolution_fractor);
+  /* octomap::OcTreeKey robot_key = octree_local_->coordToKey(robotOriginTf.x, robotOriginTf.y, robotOriginTf.z); */
+  /* octree_local_->updateNode(robot_key, false); */
+
+  // CROP THE MAP AROUND THE ROBOT
+  {
+
+    mrs_lib::ScopeTimer timer = mrs_lib::ScopeTimer("OctomapServer::localMapCopy", scope_timer_logger_, _scope_timer_enabled_);
+
+    auto [local_map_width, local_map_height] = mrs_lib::get_mutexed(mutex_local_map_dimensions_, local_map_width_, local_map_height_);
+
+    float x        = sensor_origin.x();
+    float y        = sensor_origin.y();
+    float z        = sensor_origin.z();
+    float width_2  = local_map_width / float(2.0);
+    float height_2 = local_map_height / float(2.0);
+
+    octomap::point3d roi_min(x - width_2, y - width_2, z - height_2);
+    octomap::point3d roi_max(x + width_2, y + width_2, z + height_2);
+
+    std::shared_ptr<OcTree_t> from;
+
+    if (octree_local_idx_ == 0) {
+      from              = octree_local_0_;
+      octree_local_     = octree_local_1_;
+      octree_local_idx_ = 1;
+    } else {
+      from              = octree_local_1_;
+      octree_local_     = octree_local_0_;
+      octree_local_idx_ = 0;
+    }
+
+    octree_local_->clear();
+
+    copyInsideBBX2(from, octree_local_, roi_min, roi_max);
+  }
+
+  ros::Time time_end = ros::Time::now();
+
+  {
+    std::scoped_lock lock(mutex_local_map_duty_);
+
+    local_map_duty_ += (time_end - time_start).toSec();
   }
 }
 
@@ -1682,7 +1800,7 @@ bool OctomapServer::loadFromFile(const std::string& filename) {
   std::string file_path = _map_path_ + "/" + filename + ".ot";
 
   {
-    std::scoped_lock lock(mutex_octree_);
+    std::scoped_lock lock(mutex_octree_global_);
 
     if (file_path.length() <= 3)
       return false;
@@ -1690,7 +1808,7 @@ bool OctomapServer::loadFromFile(const std::string& filename) {
     std::string suffix = file_path.substr(file_path.length() - 3, 3);
 
     if (suffix == ".bt") {
-      if (!octree_->readBinary(file_path)) {
+      if (!octree_global_->readBinary(file_path)) {
         return false;
       }
     } else if (suffix == ".ot") {
@@ -1701,9 +1819,9 @@ bool OctomapServer::loadFromFile(const std::string& filename) {
       }
 
       OcTree_t* octree = dynamic_cast<OcTree_t*>(tree);
-      octree_          = std::shared_ptr<OcTree_t>(octree);
+      octree_global_   = std::shared_ptr<OcTree_t>(octree);
 
-      if (!octree_) {
+      if (!octree_global_) {
         ROS_ERROR("[OctomapServer]: could not read OcTree file");
         return false;
       }
@@ -1712,7 +1830,7 @@ bool OctomapServer::loadFromFile(const std::string& filename) {
       return false;
     }
 
-    octree_resolution_ = octree_->getResolution();
+    octree_resolution_ = octree_global_->getResolution();
   }
 
   return true;
@@ -1724,7 +1842,7 @@ bool OctomapServer::loadFromFile(const std::string& filename) {
 
 bool OctomapServer::saveToFile(const std::string& filename) {
 
-  std::scoped_lock lock(mutex_octree_);
+  std::scoped_lock lock(mutex_octree_global_);
 
   std::string file_path        = _map_path_ + "/" + filename + ".ot";
   std::string tmp_file_path    = _map_path_ + "/tmp_" + filename + ".ot";
@@ -1739,7 +1857,7 @@ bool OctomapServer::saveToFile(const std::string& filename) {
 
   std::string suffix = file_path.substr(file_path.length() - 3, 3);
 
-  if (!octree_->write(tmp_file_path)) {
+  if (!octree_global_->write(tmp_file_path)) {
     ROS_ERROR("[OctomapServer]: error writing to file '%s'", file_path.c_str());
     return false;
   }
@@ -1772,25 +1890,42 @@ bool OctomapServer::copyInsideBBX2(std::shared_ptr<OcTree_t>& from, std::shared_
   bool got_root = root ? true : false;
 
   if (!got_root) {
-    octomap::OcTreeKey key = to->coordToKey(p_min.x() - to->getResolution() * 2.0, p_min.y(), p_min.z(), to->getTreeDepth());
+    octomap::OcTreeKey key = to->coordToKey(0, 0, 0, to->getTreeDepth());
     to->setNodeValue(key, 1.0);
   }
 
-  for (OcTree_t::leaf_bbx_iterator it = from->begin_leafs_bbx(p_min, p_max, from->getTreeDepth() - resolution_fractor_), end = from->end_leafs_bbx(); it != end;
-       ++it) {
-
-    octomap::OcTreeNode* orig_node = it.getNode();
-
-    from->eatChildren(orig_node);
+  for (OcTree_t::leaf_bbx_iterator it = from->begin_leafs_bbx(p_min, p_max), end = from->end_leafs_bbx(); it != end; ++it) {
 
     octomap::OcTreeKey   k    = it.getKey();
     octomap::OcTreeNode* node = touchNode(to, k, it.getDepth());
-    node->setValue(orig_node->getValue());
+    node->setValue(it->getValue());
   }
 
+  return true;
+}
+
+//}
+
+/* copyLocalMap() //{ */
+
+bool OctomapServer::copyLocalMap(std::shared_ptr<OcTree_t>& from, std::shared_ptr<OcTree_t>& to) {
+
+  octomap::OcTreeKey minKey, maxKey;
+
+  octomap::OcTreeNode* root = to->getRoot();
+
+  bool got_root = root ? true : false;
+
   if (!got_root) {
-    octomap::OcTreeKey key = to->coordToKey(p_min.x() - to->getResolution() * 2.0, p_min.y(), p_min.z(), to->getTreeDepth());
-    to->deleteNode(key, to->getTreeDepth());
+    octomap::OcTreeKey key = to->coordToKey(0, 0, 0, to->getTreeDepth());
+    to->setNodeValue(key, 1.0);
+  }
+
+  for (OcTree_t::leaf_iterator it = from->begin_leafs(), end = from->end_leafs(); it != end; ++it) {
+
+    octomap::OcTreeKey   k    = it.getKey();
+    octomap::OcTreeNode* node = touchNode(to, k, it.getDepth());
+    node->setValue(it->getValue());
   }
 
   return true;
@@ -1831,20 +1966,6 @@ octomap::OcTreeNode* OctomapServer::touchNodeRecurs(std::shared_ptr<OcTree_t>& o
 
   // at last level, update node, end of recursion
   else {
-
-    octree->eatChildren(node);
-
-    // destroy all children
-    /* for (int i = 0; i < 8; i++) { */
-
-    /*   if (octree->nodeChildExists(node, i)) { */
-
-    /*     auto child = octree->getNodeChild(node, i); */
-
-    /*     octree->deleteNodeChild(node, i); */
-    /*   } */
-    /* } */
-
     return node;
   }
 }
@@ -1961,64 +2082,6 @@ bool OctomapServer::translateMap(std::shared_ptr<OcTree_t>& octree, const double
   ROS_INFO("[OctomapServer]: map translated");
 
   return true;
-}
-
-//}
-
-/* createLocalMap() //{ */
-
-bool OctomapServer::createLocalMap(const std::string frame_id, const double horizontal_distance, const double vertical_distance,
-                                   std::shared_ptr<OcTree_t>& octree) {
-
-  std::scoped_lock lock(mutex_octree_);
-
-  ros::Time time_start = ros::Time::now();
-
-  auto res = transformer_.getTransform(frame_id, _world_frame_);
-
-  if (!res) {
-    ROS_WARN_THROTTLE(1.0, "[OctomapServer]: createLocalMap(): could not find tf from %s to %s", frame_id.c_str(), _world_frame_.c_str());
-    return false;
-  }
-
-  geometry_msgs::TransformStamped world_to_robot = res.value().getTransform();
-
-  double robot_x = world_to_robot.transform.translation.x;
-  double robot_y = world_to_robot.transform.translation.y;
-  double robot_z = world_to_robot.transform.translation.z;
-
-  bool success = true;
-
-  // clear the old local map
-  octree->clear();
-
-  const octomap::point3d p_min =
-      octomap::point3d(float(robot_x - horizontal_distance), float(robot_y - horizontal_distance), float(robot_z - vertical_distance));
-  const octomap::point3d p_max =
-      octomap::point3d(float(robot_x + horizontal_distance), float(robot_y + horizontal_distance), float(robot_z + vertical_distance));
-
-  success = copyInsideBBX2(octree_, octree, p_min, p_max);
-
-  octree->setProbHit(octree->getProbHit());
-  octree->setProbMiss(octree->getProbMiss());
-  octree->setClampingThresMin(octree->getClampingThresMinLog());
-  octree->setClampingThresMax(octree->getClampingThresMaxLog());
-
-  {
-    std::scoped_lock lock(mutex_time_local_map_processing_);
-
-    ros::Time time_end = ros::Time::now();
-
-    time_last_local_map_processing_ = (time_end - time_start).toSec();
-
-    if (time_last_local_map_processing_ > ((1.0 / _local_map_rate_) * _local_map_max_computation_duty_cycle_)) {
-      ROS_ERROR_THROTTLE(5.0, "[OctomapServer]: local map creation time = %.3f sec", time_last_local_map_processing_);
-    } else {
-      ROS_WARN_THROTTLE(5.0, "[OctomapServer]: local map creation time = %.3f sec", time_last_local_map_processing_);
-    }
-  }
-
-  return success;
 }
 
 //}
