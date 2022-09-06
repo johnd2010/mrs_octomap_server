@@ -807,9 +807,8 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
       if (sensor_params_3d_lidar_[sensor_id].horizontal_rays != cloud->width || sensor_params_3d_lidar_[sensor_id].vertical_rays != cloud->height) {
         sensor_params_3d_lidar_[sensor_id].horizontal_rays = cloud->width;
         sensor_params_3d_lidar_[sensor_id].vertical_rays   = cloud->height;
-        ROS_INFO("[OctomapServer]: Changing sensor params for lidar %d to %d horizontal rays, %d vertical rays, %.3f horizontal FOV, %.3f vertical FOV.",
-                 sensor_id, sensor_params_depth_cam_[sensor_id].horizontal_rays, sensor_params_depth_cam_[sensor_id].vertical_rays,
-                 sensor_params_depth_cam_[sensor_id].horizontal_fov*(180/M_PI), sensor_params_depth_cam_[sensor_id].vertical_fov*(180/M_PI));
+        ROS_INFO("[OctomapServer]: Changing sensor params for lidar %d to %d horizontal rays, %d vertical rays.",
+                 sensor_id, sensor_params_3d_lidar_[sensor_id].horizontal_rays, sensor_params_3d_lidar_[sensor_id].vertical_rays);
         initialize3DLidarLUT(sensor_3d_lidar_xyz_lut_[sensor_id], sensor_params_3d_lidar_[sensor_id]);
       }
 
