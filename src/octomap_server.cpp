@@ -135,7 +135,7 @@ public:
 
   void callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>& wrp, const SensorType_t sensor_type, const int sensor_id);
   void callbackLaserScan(mrs_lib::SubscribeHandler<sensor_msgs::LaserScan>& wrp);
-  void callbackCameraInfo(mrs_lib::SubscribeHandler<sensor_msgs::CameraInfo>& wrp);
+  void callbackCameraInfo(mrs_lib::SubscribeHandler<sensor_msgs::CameraInfo>& wrp, const int sensor_id);
   bool loadFromFile(const std::string& filename);
   bool saveToFile(const std::string& filename);
 
@@ -150,9 +150,8 @@ private:
 
   std::vector<mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>> sh_3dlaser_pc2_;
   std::vector<mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>> sh_depth_cam_pc2_;
+  std::vector<mrs_lib::SubscribeHandler<sensor_msgs::CameraInfo>>  sh_depth_cam_info_;
   std::vector<mrs_lib::SubscribeHandler<sensor_msgs::LaserScan>>   sh_laser_scan_;
-
-  mrs_lib::SubscribeHandler<sensor_msgs::CameraInfo> sh_camera_info_;
 
   // | ----------------------- publishers ----------------------- |
 
@@ -296,7 +295,7 @@ private:
 
   std::mutex mutex_lut_;
 
-  std::atomic<bool> camera_info_processed_ = false;
+  std::vector<bool> vec_camera_info_processed_;
 
   // sensor model
   double _probHit_;
@@ -461,6 +460,9 @@ void OctomapServer::onInit() {
     sensor_depth_camera_xyz_lut_.push_back(lut_table);
 
     initializeDepthCamLUT(sensor_depth_camera_xyz_lut_[i], sensor_params_depth_cam_[i]);
+
+    vec_camera_info_processed_.push_back(false);
+
   }
 
   //}
@@ -540,7 +542,6 @@ void OctomapServer::onInit() {
 
   sh_control_manager_diag_ = mrs_lib::SubscribeHandler<mrs_msgs::ControlManagerDiagnostics>(shopts, "control_manager_diagnostics_in");
   sh_height_               = mrs_lib::SubscribeHandler<mrs_msgs::Float64Stamped>(shopts, "height_in");
-  sh_camera_info_          = mrs_lib::SubscribeHandler<sensor_msgs::CameraInfo>(shopts, "camera_info_in", &OctomapServer::callbackCameraInfo, this);
 
   for (int i = 0; i < n_sensors_3d_lidar_; i++) {
 
@@ -558,6 +559,15 @@ void OctomapServer::onInit() {
 
     sh_depth_cam_pc2_.push_back(mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>(
         shopts, ss.str(), std::bind(&OctomapServer::callback3dLidarCloud2, this, std::placeholders::_1, DEPTH_CAMERA, i)));
+  }
+
+  for (int i = 0; i < n_sensors_depth_cam_; i++) {
+
+    std::stringstream ss;
+    ss << "camera_info_" << i << "_in";
+
+    sh_depth_cam_info_.push_back(mrs_lib::SubscribeHandler<sensor_msgs::CameraInfo>(
+        shopts, ss.str(), std::bind(&OctomapServer::callbackCameraInfo, this, std::placeholders::_1, i)));
   }
 
   /* sh_laser_scan_ = mrs_lib::SubscribeHandler<sensor_msgs::LaserScan>(shopts, "laser_scan_in", &OctomapServer::callbackLaserScan, this); */
@@ -609,13 +619,13 @@ void OctomapServer::onInit() {
 
 // | --------------------- topic callbacks -------------------- |
 
-void OctomapServer::callbackCameraInfo(mrs_lib::SubscribeHandler<sensor_msgs::CameraInfo>& wrp) {
+void OctomapServer::callbackCameraInfo(mrs_lib::SubscribeHandler<sensor_msgs::CameraInfo>& wrp, const int sensor_id) {
 
   if (!is_initialized_) {
     return;
   }
 
-  if (camera_info_processed_) {
+  if (vec_camera_info_processed_.at(sensor_id)) {
     return;
   }
 
@@ -623,19 +633,18 @@ void OctomapServer::callbackCameraInfo(mrs_lib::SubscribeHandler<sensor_msgs::Ca
 
   std::scoped_lock lock(mutex_lut_);
 
-  for (size_t i = 0; i < sensor_params_depth_cam_.size(); i++) {
+  sensor_params_depth_cam_[sensor_id].horizontal_fov = 2 * atan(msg.width / (2 * msg.K[0]));
+  sensor_params_depth_cam_[sensor_id].vertical_fov   = 2 * atan(msg.height / (2 * msg.K[4]));
 
-    sensor_params_depth_cam_[i].horizontal_fov = 2 * atan(msg.width / (2 * msg.K[0]));
-    sensor_params_depth_cam_[i].vertical_fov   = 2 * atan(msg.height / (2 * msg.K[4]));
+  ROS_INFO(
+      "[OctomapServer]: Changing sensor params based on camera_info for depth camera %d to %d horizontal rays, %d vertical rays, %.3f horizontal FOV, %.3f "
+      "vertical FOV.",
+      (int)sensor_id, sensor_params_depth_cam_[sensor_id].horizontal_rays, sensor_params_depth_cam_[sensor_id].vertical_rays,
+      sensor_params_depth_cam_[sensor_id].horizontal_fov * (180 / M_PI), sensor_params_depth_cam_[sensor_id].vertical_fov * (180 / M_PI));
 
-    ROS_INFO("[OctomapServer]: Changing sensor params based on camera_info for depth camera %d to %d horizontal rays, %d vertical rays, %.3f horizontal FOV, %.3f vertical FOV.",
-             (int)i, sensor_params_depth_cam_[i].horizontal_rays, sensor_params_depth_cam_[i].vertical_rays, sensor_params_depth_cam_[i].horizontal_fov*(180/M_PI),
-             sensor_params_depth_cam_[i].vertical_fov*(180/M_PI));
+  initializeDepthCamLUT(sensor_depth_camera_xyz_lut_[sensor_id], sensor_params_depth_cam_[sensor_id]);
 
-    initializeDepthCamLUT(sensor_depth_camera_xyz_lut_[i], sensor_params_depth_cam_[i]);
-  }
-
-  camera_info_processed_ = true;
+  vec_camera_info_processed_.at(sensor_id) = true;
 }
 
 /* callbackLaserScan() //{ */
@@ -746,7 +755,8 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
     return;
   }
 
-  if (sensor_type == DEPTH_CAMERA && !camera_info_processed_) {
+  if (sensor_type == DEPTH_CAMERA && !vec_camera_info_processed_.at(sensor_id)) {
+    ROS_WARN_THROTTLE(1.0, "[OctomapServer]: Received data for depth camera %d but no camera info received yet.", sensor_id);
     return;
   }
 
@@ -807,8 +817,8 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
       if (sensor_params_3d_lidar_[sensor_id].horizontal_rays != cloud->width || sensor_params_3d_lidar_[sensor_id].vertical_rays != cloud->height) {
         sensor_params_3d_lidar_[sensor_id].horizontal_rays = cloud->width;
         sensor_params_3d_lidar_[sensor_id].vertical_rays   = cloud->height;
-        ROS_INFO("[OctomapServer]: Changing sensor params for lidar %d to %d horizontal rays, %d vertical rays.",
-                 sensor_id, sensor_params_3d_lidar_[sensor_id].horizontal_rays, sensor_params_3d_lidar_[sensor_id].vertical_rays);
+        ROS_INFO("[OctomapServer]: Changing sensor params for lidar %d to %d horizontal rays, %d vertical rays.", sensor_id,
+                 sensor_params_3d_lidar_[sensor_id].horizontal_rays, sensor_params_3d_lidar_[sensor_id].vertical_rays);
         initialize3DLidarLUT(sensor_3d_lidar_xyz_lut_[sensor_id], sensor_params_3d_lidar_[sensor_id]);
       }
 
@@ -827,7 +837,7 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
         sensor_params_depth_cam_[sensor_id].vertical_rays   = cloud->height;
         ROS_INFO("[OctomapServer]: Changing sensor params for depth camera %d to %d horizontal rays, %d vertical rays, %.3f horizontal FOV, %.3f vertical FOV.",
                  sensor_id, sensor_params_depth_cam_[sensor_id].horizontal_rays, sensor_params_depth_cam_[sensor_id].vertical_rays,
-                 sensor_params_depth_cam_[sensor_id].horizontal_fov*(180/M_PI), sensor_params_depth_cam_[sensor_id].vertical_fov*(180/M_PI));
+                 sensor_params_depth_cam_[sensor_id].horizontal_fov * (180 / M_PI), sensor_params_depth_cam_[sensor_id].vertical_fov * (180 / M_PI));
         initializeDepthCamLUT(sensor_depth_camera_xyz_lut_[sensor_id], sensor_params_depth_cam_[sensor_id]);
       }
 
