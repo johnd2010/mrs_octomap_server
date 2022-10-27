@@ -78,6 +78,7 @@
 
       <remap from="~control_manager_diagnostics_in" to="control_manager/diagnostics" />
       <remap from="~height_in" to="odometry/height" />
+      <remap from="~clear_box_in" to="uav_tf_publisher/clear_box" />
 
       <!-- topics out -->
 

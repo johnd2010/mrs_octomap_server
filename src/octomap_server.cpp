@@ -59,6 +59,8 @@
 
 #include <cmath>
 
+#include <mrs_octomap_server/PoseWithSize.h>
+
 //}
 
 namespace mrs_octomap_server
@@ -147,6 +149,7 @@ private:
 
   mrs_lib::SubscribeHandler<mrs_msgs::ControlManagerDiagnostics> sh_control_manager_diag_;
   mrs_lib::SubscribeHandler<mrs_msgs::Float64Stamped>            sh_height_;
+  mrs_lib::SubscribeHandler<mrs_octomap_server::PoseWithSize>    sh_clear_box_;
 
   std::vector<mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>> sh_3dlaser_pc2_;
   std::vector<mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>> sh_depth_cam_pc2_;
@@ -542,6 +545,7 @@ void OctomapServer::onInit() {
 
   sh_control_manager_diag_ = mrs_lib::SubscribeHandler<mrs_msgs::ControlManagerDiagnostics>(shopts, "control_manager_diagnostics_in");
   sh_height_               = mrs_lib::SubscribeHandler<mrs_msgs::Float64Stamped>(shopts, "height_in");
+  sh_clear_box_            = mrs_lib::SubscribeHandler<mrs_octomap_server::PoseWithSize>(shopts, "clear_box_in");
 
   for (int i = 0; i < n_sensors_3d_lidar_; i++) {
 
@@ -1660,6 +1664,47 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
     copyInsideBBX2(from, octree_local_, roi_min, roi_max);
   }
+
+  /* set free space in the bounding box specified by clear_box topic *//*//{*/
+  {
+    // TODO mutex?
+    if (sh_clear_box_.hasMsg()) {
+      mrs_octomap_server::PoseWithSize pws = *sh_clear_box_.getMsg();
+      if ((ros::Time::now() - pws.header.stamp).toSec() < 1.0) {
+        // transform the pose to octomap frame
+        geometry_msgs::PoseStamped pose_stamped;
+        pose_stamped.header = pws.header;
+        pose_stamped.pose   = pws.pose;
+        auto res            = transformer_->transformSingle(pose_stamped, _world_frame_);
+        if (res) {
+          auto pose = res.value();
+          // calculate bounding box around the odometry
+          double resolution = octree_local_->getResolution();
+          double min_x      = pose.pose.position.x - pws.width / 2 - resolution;
+          double max_x      = pose.pose.position.x + pws.width / 2 + resolution;
+          double min_y      = pose.pose.position.y - pws.width / 2 - resolution;
+          double max_y      = pose.pose.position.y + pws.width / 2 + resolution;
+          double min_z      = pose.pose.position.z - pws.height / 2 - resolution;
+          double max_z      = pose.pose.position.z + pws.height / 2 + resolution;
+          double step       = resolution / 2;
+          // set the values in the octree
+          for (double x = min_x; x < max_x; x += step) {
+            for (double y = min_y; y < max_y; y += step) {
+              for (double z = min_z; z < max_z; z += step) {
+                octree_local_->setNodeValue(x, y, z, octomap::logodds(0.0));
+              }
+            }
+          }
+        } else {
+          ROS_WARN_THROTTLE(1.0, "[OctomapServer]: Unable to transform the pose to be cleared from frame %s to frame %s.", pws.header.frame_id.c_str(),
+                            _world_frame_.c_str());
+        }
+      } else {
+        ROS_WARN_THROTTLE(1.0, "[OctomapServer]: Latest pose from clear_box is too old - diff from now: %.3f", (ros::Time::now() - pws.header.stamp).toSec());
+      }
+    }
+  }
+/*//}*/
 
   ros::Time time_end = ros::Time::now();
 
