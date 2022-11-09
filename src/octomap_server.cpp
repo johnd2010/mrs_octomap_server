@@ -623,6 +623,7 @@ void OctomapServer::onInit() {
 
 // | --------------------- topic callbacks -------------------- |
 
+/* callbackCameraInfo() *//*//{*/
 void OctomapServer::callbackCameraInfo(mrs_lib::SubscribeHandler<sensor_msgs::CameraInfo>& wrp, const int sensor_id) {
 
   if (!is_initialized_) {
@@ -650,6 +651,7 @@ void OctomapServer::callbackCameraInfo(mrs_lib::SubscribeHandler<sensor_msgs::Ca
 
   vec_camera_info_processed_.at(sensor_id) = true;
 }
+/*//}*/
 
 /* callbackLaserScan() //{ */
 
