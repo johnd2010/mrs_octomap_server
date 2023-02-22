@@ -239,14 +239,18 @@ private:
   bool        _global_map_compress_;
   std::string _map_path_;
 
-  int        _local_map_width_;
-  int        _local_map_height_;
-  int        local_map_width_;
-  int        local_map_height_;
+  float      _local_map_width_max_;
+  float      _local_map_width_min_;
+  float      _local_map_height_max_;
+  float      _local_map_height_min_;
+  float      local_map_width_;
+  float      local_map_height_;
   std::mutex mutex_local_map_dimensions_;
   double     _local_map_publisher_rate_;
 
-  double     local_map_duty_ = 0;
+  double     local_map_duty_                 = 0;
+  double     _local_map_duty_high_threshold_ = 0;
+  double     _local_map_duty_low_threshold_  = 0;
   std::mutex mutex_local_map_duty_;
 
   bool   _unknown_rays_update_free_space_;
@@ -342,14 +346,18 @@ void OctomapServer::onInit() {
   param_loader.loadParam("global_map/publish_full", _global_map_publish_full_);
   param_loader.loadParam("global_map/publish_binary", _global_map_publish_binary_);
 
-  param_loader.loadParam("local_map/size/width", _local_map_width_);
-  param_loader.loadParam("local_map/size/height", _local_map_height_);
+  param_loader.loadParam("local_map/size/max_width", _local_map_width_max_);
+  param_loader.loadParam("local_map/size/max_height", _local_map_height_max_);
+  param_loader.loadParam("local_map/size/min_width", _local_map_width_min_);
+  param_loader.loadParam("local_map/size/min_height", _local_map_height_min_);
+  param_loader.loadParam("local_map/size/duty_high_threshold", _local_map_duty_high_threshold_);
+  param_loader.loadParam("local_map/size/duty_low_threshold", _local_map_duty_low_threshold_);
   param_loader.loadParam("local_map/publisher_rate", _local_map_publisher_rate_);
   param_loader.loadParam("local_map/publish_full", _local_map_publish_full_);
   param_loader.loadParam("local_map/publish_binary", _local_map_publish_binary_);
 
-  local_map_width_  = _local_map_width_;
-  local_map_height_ = _local_map_height_;
+  local_map_width_  = _local_map_width_max_;
+  local_map_height_ = _local_map_height_max_;
 
   param_loader.loadParam("resolution", octree_resolution_);
   param_loader.loadParam("world_frame_id", _world_frame_);
@@ -465,7 +473,6 @@ void OctomapServer::onInit() {
     initializeDepthCamLUT(sensor_depth_camera_xyz_lut_[i], sensor_params_depth_cam_[i]);
 
     vec_camera_info_processed_.push_back(false);
-
   }
 
   //}
@@ -570,8 +577,8 @@ void OctomapServer::onInit() {
     std::stringstream ss;
     ss << "camera_info_" << i << "_in";
 
-    sh_depth_cam_info_.push_back(mrs_lib::SubscribeHandler<sensor_msgs::CameraInfo>(
-        shopts, ss.str(), std::bind(&OctomapServer::callbackCameraInfo, this, std::placeholders::_1, i)));
+    sh_depth_cam_info_.push_back(
+        mrs_lib::SubscribeHandler<sensor_msgs::CameraInfo>(shopts, ss.str(), std::bind(&OctomapServer::callbackCameraInfo, this, std::placeholders::_1, i)));
   }
 
   /* sh_laser_scan_ = mrs_lib::SubscribeHandler<sensor_msgs::LaserScan>(shopts, "laser_scan_in", &OctomapServer::callbackLaserScan, this); */
@@ -623,7 +630,7 @@ void OctomapServer::onInit() {
 
 // | --------------------- topic callbacks -------------------- |
 
-/* callbackCameraInfo() *//*//{*/
+/* callbackCameraInfo() */ /*//{*/
 void OctomapServer::callbackCameraInfo(mrs_lib::SubscribeHandler<sensor_msgs::CameraInfo>& wrp, const int sensor_id) {
 
   if (!is_initialized_) {
@@ -1268,35 +1275,33 @@ void OctomapServer::timerLocalMapResizer([[maybe_unused]] const ros::TimerEvent&
 
   auto local_map_duty = mrs_lib::get_mutexed(mutex_local_map_duty_, local_map_duty_);
 
-  ROS_INFO("[OctomapServer]: local map duty time: %.3f s", local_map_duty);
-
   {
     std::scoped_lock lock(mutex_local_map_dimensions_);
 
-    if (local_map_duty > 0.9) {
-      local_map_width_ -= int(ceil(10.0 * (local_map_duty - 0.9)));
-      local_map_height_ -= int(ceil(10.0 * (local_map_duty - 0.9)));
-    } else if (local_map_duty < 0.8) {
-      local_map_width_++;
-      local_map_height_++;
+    if (local_map_duty > _local_map_duty_high_threshold_) {
+      local_map_width_ -= ceil(10.0 * (local_map_duty - _local_map_duty_high_threshold_));
+      local_map_height_ -= ceil(10.0 * (local_map_duty - _local_map_duty_high_threshold_));
+    } else if (local_map_duty < _local_map_duty_low_threshold_) {
+      local_map_width_  = local_map_width_ + 1.0f;
+      local_map_height_ = local_map_height_ + 1.0f;
     }
 
-    if (local_map_width_ < 10) {
-      local_map_width_ = 10;
-    } else if (local_map_width_ > _local_map_width_) {
-      local_map_width_ = _local_map_width_;
+    if (local_map_width_ < _local_map_width_min_) {
+      local_map_width_ = _local_map_width_min_;
+    } else if (local_map_width_ > _local_map_width_max_) {
+      local_map_width_ = _local_map_width_max_;
     }
 
-    if (local_map_height_ < 10) {
-      local_map_height_ = 10;
-    } else if (local_map_height_ > _local_map_height_) {
-      local_map_height_ = _local_map_height_;
+    if (local_map_height_ < _local_map_height_min_) {
+      local_map_height_ = _local_map_height_min_;
+    } else if (local_map_height_ > _local_map_height_max_) {
+      local_map_height_ = _local_map_height_max_;
     }
+
+    ROS_INFO("[OctomapServer]: local map - duty time: %.3f s; size: width %.3f m, height %.3f m", local_map_duty, local_map_width_, local_map_height_);
 
     local_map_duty = 0;
   }
-
-  ROS_INFO("[OctomapServer]: local map size %d %d", local_map_width_, local_map_height_);
 
   mrs_lib::set_mutexed(mutex_local_map_duty_, local_map_duty, local_map_duty_);
 }
@@ -1667,7 +1672,7 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
     copyInsideBBX2(from, octree_local_, roi_min, roi_max);
   }
 
-  /* set free space in the bounding box specified by clear_box topic *//*//{*/
+  /* set free space in the bounding box specified by clear_box topic */ /*//{*/
   {
     // TODO mutex?
     if (sh_clear_box_.hasMsg()) {
@@ -1706,7 +1711,7 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
       }
     }
   }
-/*//}*/
+  /*//}*/
 
   ros::Time time_end = ros::Time::now();
 
