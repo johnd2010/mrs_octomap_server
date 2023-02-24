@@ -19,6 +19,10 @@
   <arg name="depth_camera_topic_1_in" default="~REMAP_ME" />
   <arg name="depth_camera_topic_2_in" default="~REMAP_ME" />
 
+  <arg name="depth_camera_topic_0_over_max_range_in" default="~REMAP_ME" />
+  <arg name="depth_camera_topic_1_over_max_range_in" default="~REMAP_ME" />
+  <arg name="depth_camera_topic_2_over_max_range_in" default="~REMAP_ME" />
+
   <arg name="camera_info_topic_0_in" default="~REMAP_ME" />
   <arg name="camera_info_topic_1_in" default="~REMAP_ME" />
   <arg name="camera_info_topic_2_in" default="~REMAP_ME" />
@@ -71,6 +75,10 @@
       <remap from="~depth_camera_0_in" to="$(arg depth_camera_topic_0_in)" />
       <remap from="~depth_camera_1_in" to="$(arg depth_camera_topic_1_in)" />
       <remap from="~depth_camera_2_in" to="$(arg depth_camera_topic_2_in)" />
+
+      <remap from="~depth_camera_0_over_max_range_in" to="$(arg depth_camera_topic_0_over_max_range_in)" />
+      <remap from="~depth_camera_1_over_max_range_in" to="$(arg depth_camera_topic_1_over_max_range_in)" />
+      <remap from="~depth_camera_2_over_max_range_in" to="$(arg depth_camera_topic_2_over_max_range_in)" />
 
       <remap from="~camera_info_0_in" to="$(arg camera_info_topic_0_in)" />
       <remap from="~camera_info_1_in" to="$(arg camera_info_topic_1_in)" />

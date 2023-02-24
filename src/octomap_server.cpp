@@ -86,18 +86,26 @@ typedef struct
 typedef struct
 {
   double max_range;
+  double free_ray_distance;
   double vertical_fov;
   int    vertical_rays;
   int    horizontal_rays;
+  bool   update_free_space;
+  bool   clear_occupied;
+  double free_ray_distance_unknown;
 } SensorParams3DLidar_t;
 
 typedef struct
 {
   double max_range;
+  double free_ray_distance;
   double vertical_fov;
   double horizontal_fov;
   int    vertical_rays;
   int    horizontal_rays;
+  bool   update_free_space;
+  bool   clear_occupied;
+  double free_ray_distance_unknown;
 } SensorParamsDepthCam_t;
 
 #ifdef COLOR_OCTOMAP_SERVER
@@ -121,6 +129,8 @@ typedef enum
 
 } SensorType_t;
 
+const std::string _sensor_names_[] = {"LIDAR_3D", "LIDAR_2D", "LIDAR_1D", "DEPTH_CAMERA", "ULTRASOUND"};
+
 //}
 
 /* class OctomapServer //{ */
@@ -135,7 +145,8 @@ public:
 
   bool callbackResetMap(std_srvs::Empty::Request& req, std_srvs::Empty::Response& resp);
 
-  void callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>& wrp, const SensorType_t sensor_type, const int sensor_id);
+  void callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>& wrp, const SensorType_t sensor_type, const int sensor_id,
+                             const bool pcl_over_max_range = false);
   void callbackLaserScan(mrs_lib::SubscribeHandler<sensor_msgs::LaserScan>& wrp);
   void callbackCameraInfo(mrs_lib::SubscribeHandler<sensor_msgs::CameraInfo>& wrp, const int sensor_id);
   bool loadFromFile(const std::string& filename);
@@ -276,10 +287,13 @@ private:
 
   bool createLocalMap(const std::string frame_id, const double horizontal_distance, const double vertical_distance, std::shared_ptr<OcTree_t>& octree);
 
-  virtual void insertPointCloud(const geometry_msgs::Vector3& sensorOrigin, const PCLPointCloud::ConstPtr& cloud, const PCLPointCloud::ConstPtr& free_cloud);
+  virtual void insertPointCloud(const geometry_msgs::Vector3& sensorOrigin, const PCLPointCloud::ConstPtr& cloud, const PCLPointCloud::ConstPtr& free_cloud,
+                                double free_ray_distance, bool unknown_clear_occupied = false);
 
   void initialize3DLidarLUT(xyz_lut_t& lut, const SensorParams3DLidar_t sensor_params);
   void initializeDepthCamLUT(xyz_lut_t& lut, const SensorParamsDepthCam_t sensor_params);
+
+  void timeoutGeneric(const std::string& topic, const ros::Time& last_msg, [[maybe_unused]] const int n_pubs);
 
   bool                                       scope_timer_enabled_ = false;
   std::shared_ptr<mrs_lib::ScopeTimerLogger> scope_timer_logger_;
@@ -394,6 +408,9 @@ void OctomapServer::onInit() {
     std::stringstream max_range_param_name;
     max_range_param_name << "sensor_params/depth_camera/sensor_" << i << "/max_range";
 
+    std::stringstream free_ray_distance_param_name;
+    free_ray_distance_param_name << "sensor_params/depth_camera/sensor_" << i << "/free_ray_distance";
+
     std::stringstream horizontal_rays_param_name;
     horizontal_rays_param_name << "sensor_params/depth_camera/sensor_" << i << "/horizontal_rays";
 
@@ -406,13 +423,26 @@ void OctomapServer::onInit() {
     std::stringstream vfov_param_name;
     vfov_param_name << "sensor_params/depth_camera/sensor_" << i << "/vertical_fov_angle";
 
+    std::stringstream update_free_space_param_name;
+    update_free_space_param_name << "sensor_params/depth_camera/sensor_" << i << "/unknown_rays/update_free_space";
+
+    std::stringstream clear_occupied_param_name;
+    clear_occupied_param_name << "sensor_params/depth_camera/sensor_" << i << "/unknown_rays/clear_occupied";
+
+    std::stringstream free_ray_distance_unknown_param_name;
+    free_ray_distance_unknown_param_name << "sensor_params/depth_camera/sensor_" << i << "/unknown_rays/free_ray_distance_unknown";
+
     SensorParamsDepthCam_t params;
 
     param_loader.loadParam(max_range_param_name.str(), params.max_range);
+    param_loader.loadParam(free_ray_distance_param_name.str(), params.free_ray_distance);
     param_loader.loadParam(horizontal_rays_param_name.str(), params.horizontal_rays);
     param_loader.loadParam(vertical_rays_param_name.str(), params.vertical_rays);
     param_loader.loadParam(hfov_param_name.str(), params.horizontal_fov);
     param_loader.loadParam(vfov_param_name.str(), params.vertical_fov);
+    param_loader.loadParam(update_free_space_param_name.str(), params.update_free_space);
+    param_loader.loadParam(clear_occupied_param_name.str(), params.clear_occupied);
+    param_loader.loadParam(free_ray_distance_unknown_param_name.str(), params.free_ray_distance_unknown);
 
     sensor_params_depth_cam_.push_back(params);
   }
@@ -421,6 +451,9 @@ void OctomapServer::onInit() {
 
     std::stringstream max_range_param_name;
     max_range_param_name << "sensor_params/3d_lidar/sensor_" << i << "/max_range";
+
+    std::stringstream free_ray_distance_param_name;
+    free_ray_distance_param_name << "sensor_params/3d_lidar/sensor_" << i << "/free_ray_distance";
 
     std::stringstream horizontal_rays_param_name;
     horizontal_rays_param_name << "sensor_params/3d_lidar/sensor_" << i << "/horizontal_rays";
@@ -431,12 +464,25 @@ void OctomapServer::onInit() {
     std::stringstream vfov_param_name;
     vfov_param_name << "sensor_params/3d_lidar/sensor_" << i << "/vertical_fov_angle";
 
+    std::stringstream update_free_space_param_name;
+    update_free_space_param_name << "sensor_params/3d_lidar/sensor_" << i << "/unknown_rays/update_free_space";
+
+    std::stringstream clear_occupied_param_name;
+    clear_occupied_param_name << "sensor_params/3d_lidar/sensor_" << i << "/unknown_rays/clear_occupied";
+
+    std::stringstream free_ray_distance_unknown_param_name;
+    free_ray_distance_unknown_param_name << "sensor_params/3d_lidar/sensor_" << i << "/unknown_rays/free_ray_distance_unknown";
+
     SensorParams3DLidar_t params;
 
     param_loader.loadParam(max_range_param_name.str(), params.max_range);
+    param_loader.loadParam(free_ray_distance_param_name.str(), params.free_ray_distance);
     param_loader.loadParam(horizontal_rays_param_name.str(), params.horizontal_rays);
     param_loader.loadParam(vertical_rays_param_name.str(), params.vertical_rays);
     param_loader.loadParam(vfov_param_name.str(), params.vertical_fov);
+    param_loader.loadParam(update_free_space_param_name.str(), params.update_free_space);
+    param_loader.loadParam(clear_occupied_param_name.str(), params.clear_occupied);
+    param_loader.loadParam(free_ray_distance_unknown_param_name.str(), params.free_ray_distance_unknown);
 
     sensor_params_3d_lidar_.push_back(params);
   }
@@ -559,8 +605,9 @@ void OctomapServer::onInit() {
     std::stringstream ss;
     ss << "lidar_3d_" << i << "_in";
 
-    sh_3dlaser_pc2_.push_back(mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>(
-        shopts, ss.str(), std::bind(&OctomapServer::callback3dLidarCloud2, this, std::placeholders::_1, LIDAR_3D, i)));
+    sh_3dlaser_pc2_.push_back(
+        mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>(shopts, ss.str(), ros::Duration(2.0), &OctomapServer::timeoutGeneric, this,
+                                                            std::bind(&OctomapServer::callback3dLidarCloud2, this, std::placeholders::_1, LIDAR_3D, i, false)));
   }
 
   for (int i = 0; i < n_sensors_depth_cam_; i++) {
@@ -569,7 +616,15 @@ void OctomapServer::onInit() {
     ss << "depth_camera_" << i << "_in";
 
     sh_depth_cam_pc2_.push_back(mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>(
-        shopts, ss.str(), std::bind(&OctomapServer::callback3dLidarCloud2, this, std::placeholders::_1, DEPTH_CAMERA, i)));
+        shopts, ss.str(), ros::Duration(2.0), &OctomapServer::timeoutGeneric, this,
+        std::bind(&OctomapServer::callback3dLidarCloud2, this, std::placeholders::_1, DEPTH_CAMERA, i, false)));
+
+    std::stringstream ss2;
+    ss2 << "depth_camera_" << i << "_over_max_range_in";
+
+    sh_depth_cam_pc2_.push_back(mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>(
+        shopts, ss2.str(), ros::Duration(2.0), &OctomapServer::timeoutGeneric, this,
+        std::bind(&OctomapServer::callback3dLidarCloud2, this, std::placeholders::_1, DEPTH_CAMERA, i, true)));
   }
 
   for (int i = 0; i < n_sensors_depth_cam_; i++) {
@@ -578,10 +633,9 @@ void OctomapServer::onInit() {
     ss << "camera_info_" << i << "_in";
 
     sh_depth_cam_info_.push_back(
-        mrs_lib::SubscribeHandler<sensor_msgs::CameraInfo>(shopts, ss.str(), std::bind(&OctomapServer::callbackCameraInfo, this, std::placeholders::_1, i)));
+        mrs_lib::SubscribeHandler<sensor_msgs::CameraInfo>(shopts, ss.str(), ros::Duration(2.0), &OctomapServer::timeoutGeneric, this,
+                                                           std::bind(&OctomapServer::callbackCameraInfo, this, std::placeholders::_1, i)));
   }
-
-  /* sh_laser_scan_ = mrs_lib::SubscribeHandler<sensor_msgs::LaserScan>(shopts, "laser_scan_in", &OctomapServer::callbackLaserScan, this); */
 
   //}
 
@@ -749,7 +803,7 @@ void OctomapServer::callbackLaserScan(mrs_lib::SubscribeHandler<sensor_msgs::Las
   pc->header.frame_id              = _world_frame_;
   free_vectors_pc->header.frame_id = _world_frame_;
 
-  insertPointCloud(sensorToWorldTf.transform.translation, pc, free_vectors_pc);
+  insertPointCloud(sensorToWorldTf.transform.translation, pc, free_vectors_pc, _unknown_rays_distance_, _unknown_rays_clear_occupied_);
 
   const octomap::point3d sensor_origin = octomap::pointTfToOctomap(sensorToWorldTf.transform.translation);
 }
@@ -758,7 +812,8 @@ void OctomapServer::callbackLaserScan(mrs_lib::SubscribeHandler<sensor_msgs::Las
 
 /* callback3dLidarCloud2() //{ */
 
-void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>& wrp, const SensorType_t sensor_type, const int sensor_id) {
+void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>& wrp, const SensorType_t sensor_type, const int sensor_id,
+                                          const bool pcl_over_max_range) {
 
   if (!is_initialized_) {
     return;
@@ -820,148 +875,181 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
 
   double max_range;
 
-  switch (sensor_type) {
+  if (!pcl_over_max_range) {
 
-    case LIDAR_3D: {
+    // generate sensor lookup table for free space raycasting based on pointcloud dimensions
+    if (cloud->height == 1 || cloud->width == 1) {
+      ROS_WARN_THROTTLE(2.0, "Incoming pointcloud from %s #%d on topic %s is unorganized! Free space raycasting of unknows rays won't work properly!",
+                        _sensor_names_[sensor_type].c_str(), sensor_id, wrp.topicName().c_str());
+    }
 
-      std::scoped_lock lock(mutex_lut_);
+    switch (sensor_type) {
 
-      // change number of rays if it differs from the pointcloud dimensions
-      if (sensor_params_3d_lidar_[sensor_id].horizontal_rays != cloud->width || sensor_params_3d_lidar_[sensor_id].vertical_rays != cloud->height) {
-        sensor_params_3d_lidar_[sensor_id].horizontal_rays = cloud->width;
-        sensor_params_3d_lidar_[sensor_id].vertical_rays   = cloud->height;
-        ROS_INFO("[OctomapServer]: Changing sensor params for lidar %d to %d horizontal rays, %d vertical rays.", sensor_id,
-                 sensor_params_3d_lidar_[sensor_id].horizontal_rays, sensor_params_3d_lidar_[sensor_id].vertical_rays);
-        initialize3DLidarLUT(sensor_3d_lidar_xyz_lut_[sensor_id], sensor_params_3d_lidar_[sensor_id]);
+      case LIDAR_3D: {
+
+        std::scoped_lock lock(mutex_lut_);
+
+        // change number of rays if it differs from the pointcloud dimensions
+        if (sensor_params_3d_lidar_[sensor_id].horizontal_rays != cloud->width || sensor_params_3d_lidar_[sensor_id].vertical_rays != cloud->height) {
+          sensor_params_3d_lidar_[sensor_id].horizontal_rays = cloud->width;
+          sensor_params_3d_lidar_[sensor_id].vertical_rays   = cloud->height;
+          ROS_INFO("[OctomapServer]: Changing sensor params for lidar %d to %d horizontal rays, %d vertical rays.", sensor_id,
+                   sensor_params_3d_lidar_[sensor_id].horizontal_rays, sensor_params_3d_lidar_[sensor_id].vertical_rays);
+          initialize3DLidarLUT(sensor_3d_lidar_xyz_lut_[sensor_id], sensor_params_3d_lidar_[sensor_id]);
+        }
+
+        max_range = sensor_params_3d_lidar_[sensor_id].max_range;
+
+        break;
       }
 
-      max_range = sensor_params_3d_lidar_[sensor_id].max_range;
+      case DEPTH_CAMERA: {
 
+        std::scoped_lock lock(mutex_lut_);
+
+        // change number of rays if it differs from the pointcloud dimensions
+        if (sensor_params_depth_cam_[sensor_id].horizontal_rays != cloud->width || sensor_params_depth_cam_[sensor_id].vertical_rays != cloud->height) {
+          sensor_params_depth_cam_[sensor_id].horizontal_rays = cloud->width;
+          sensor_params_depth_cam_[sensor_id].vertical_rays   = cloud->height;
+          ROS_INFO(
+              "[OctomapServer]: Changing sensor params for depth camera %d to %d horizontal rays, %d vertical rays, %.3f horizontal FOV, %.3f vertical FOV.",
+              sensor_id, sensor_params_depth_cam_[sensor_id].horizontal_rays, sensor_params_depth_cam_[sensor_id].vertical_rays,
+              sensor_params_depth_cam_[sensor_id].horizontal_fov * (180 / M_PI), sensor_params_depth_cam_[sensor_id].vertical_fov * (180 / M_PI));
+          initializeDepthCamLUT(sensor_depth_camera_xyz_lut_[sensor_id], sensor_params_depth_cam_[sensor_id]);
+        }
+
+        max_range = sensor_params_depth_cam_[sensor_id].max_range;
+
+        break;
+      }
+
+      default: {
+
+        break;
+      }
+    }
+  }
+
+  // get raycasting parameters
+  double free_ray_distance = 0;
+  bool unknown_clear_occupied = false;
+  switch (sensor_type) {
+    case LIDAR_3D: {
+      std::scoped_lock lock(mutex_lut_);
+      free_ray_distance      = sensor_params_3d_lidar_[sensor_id].free_ray_distance;
+      unknown_clear_occupied = sensor_params_3d_lidar_[sensor_id].clear_occupied;
       break;
     }
 
     case DEPTH_CAMERA: {
-
       std::scoped_lock lock(mutex_lut_);
-
-      // change number of rays if it differs from the pointcloud dimensions
-      if (sensor_params_depth_cam_[sensor_id].horizontal_rays != cloud->width || sensor_params_depth_cam_[sensor_id].vertical_rays != cloud->height) {
-        sensor_params_depth_cam_[sensor_id].horizontal_rays = cloud->width;
-        sensor_params_depth_cam_[sensor_id].vertical_rays   = cloud->height;
-        ROS_INFO("[OctomapServer]: Changing sensor params for depth camera %d to %d horizontal rays, %d vertical rays, %.3f horizontal FOV, %.3f vertical FOV.",
-                 sensor_id, sensor_params_depth_cam_[sensor_id].horizontal_rays, sensor_params_depth_cam_[sensor_id].vertical_rays,
-                 sensor_params_depth_cam_[sensor_id].horizontal_fov * (180 / M_PI), sensor_params_depth_cam_[sensor_id].vertical_fov * (180 / M_PI));
-        initializeDepthCamLUT(sensor_depth_camera_xyz_lut_[sensor_id], sensor_params_depth_cam_[sensor_id]);
-      }
-
-      max_range = sensor_params_depth_cam_[sensor_id].max_range;
-
+      free_ray_distance      = sensor_params_depth_cam_[sensor_id].free_ray_distance;
+      unknown_clear_occupied = sensor_params_depth_cam_[sensor_id].clear_occupied;
       break;
     }
-
     default: {
-
       break;
     }
   }
 
-  for (int i = 0; i < pc->size(); i++) {
+  // points that are over the max range from previous pcl filtering, update only free space
+  if (pcl_over_max_range) {
 
-    pcl::PointXYZ pt = pc->at(i);
+    free_vectors_pc->swap(*pc);
 
-    if ((std::isfinite(pt.x) && std::isfinite(pt.y) && std::isfinite(pt.z)) && ((pow(pt.x, 2) + pow(pt.y, 2) + pow(pt.z, 2)) < pow(max_range, 2))) {
+  } else {
 
-      hit_pc->push_back(pt);
+    // go through the pointcloud
+    for (int i = 0; i < pc->size(); i++) {
 
-    } else {
+      pcl::PointXYZ pt = pc->at(i);
 
-      if (_unknown_rays_update_free_space_) {
-
+      if ((!std::isfinite(pt.x) || !std::isfinite(pt.y) || !std::isfinite(pt.z))) {
+        // datapoint is missing, update only free space, if desired
         vec3_t ray_vec;
-
+        double raycasting_distance       = 0;
+        bool   unknown_update_free_space = false;
         switch (sensor_type) {
-
           case LIDAR_3D: {
-
             std::scoped_lock lock(mutex_lut_);
-
-            ray_vec = sensor_3d_lidar_xyz_lut_[sensor_id].directions.col(i);
-
+            ray_vec                   = sensor_3d_lidar_xyz_lut_[sensor_id].directions.col(i);
+            raycasting_distance       = sensor_params_3d_lidar_[sensor_id].free_ray_distance_unknown;
+            unknown_update_free_space = sensor_params_3d_lidar_[sensor_id].update_free_space;
             break;
           }
-
           case DEPTH_CAMERA: {
-
             std::scoped_lock lock(mutex_lut_);
-
-            ray_vec = sensor_depth_camera_xyz_lut_[sensor_id].directions.col(i);
-
+            ray_vec                   = sensor_depth_camera_xyz_lut_[sensor_id].directions.col(i);
+            raycasting_distance       = sensor_params_depth_cam_[sensor_id].free_ray_distance_unknown;
+            unknown_update_free_space = sensor_params_depth_cam_[sensor_id].update_free_space;
             break;
           }
-
           default: {
-
             break;
           }
         }
 
-        if (ray_vec(2) > 0.0) {
-
+        if (unknown_update_free_space) {
           pcl::PointXYZ temp_pt;
 
-          temp_pt.x = ray_vec(0) * float(max_range);
-          temp_pt.y = ray_vec(1) * float(max_range);
-          temp_pt.z = ray_vec(2) * float(max_range);
+          temp_pt.x = ray_vec(0) * float(raycasting_distance);
+          temp_pt.y = ray_vec(1) * float(raycasting_distance);
+          temp_pt.z = ray_vec(2) * float(raycasting_distance);
 
           free_vectors_pc->push_back(temp_pt);
         }
+      } else if ((pow(pt.x, 2) + pow(pt.y, 2) + pow(pt.z, 2)) > pow(max_range, 2)) {
+        // point is over the max range, update only free space
+        free_vectors_pc->push_back(pt);
+      } else {
+        // point is ok
+        hit_pc->push_back(pt);
       }
+
+      /* // add hit points to the pointcloud of occupied points */
+      /* if ((std::isfinite(pt.x) && std::isfinite(pt.y) && std::isfinite(pt.z)) && ((pow(pt.x, 2) + pow(pt.y, 2) + pow(pt.z, 2)) < pow(max_range, 2))) { */
+
+      /*   hit_pc->push_back(pt); */
+
+      /* } else { */
+
+      /*   // calculate vectors for free space raycasting of unknown rays (where data are missing, either due to filtering, being over the max_range, or not
+       * being */
+      /*   // seen by the sensor) */
+      /*   if (_unknown_rays_update_free_space_) { */
+      /*     vec3_t ray_vec; */
+      /*     switch (sensor_type) { */
+      /*       case LIDAR_3D: { */
+      /*         std::scoped_lock lock(mutex_lut_); */
+      /*         ray_vec = sensor_3d_lidar_xyz_lut_[sensor_id].directions.col(i); */
+      /*         break; */
+      /*       } */
+      /*       case DEPTH_CAMERA: { */
+      /*         std::scoped_lock lock(mutex_lut_); */
+      /*         ray_vec = sensor_depth_camera_xyz_lut_[sensor_id].directions.col(i); */
+      /*         break; */
+      /*       } */
+      /*       default: { */
+      /*         break; */
+      /*       } */
+      /*     } */
+
+      /*     /1* if (ray_vec(2) > 0.0) { *1/ */
+
+      /*     pcl::PointXYZ temp_pt; */
+
+      /*     temp_pt.x = ray_vec(0) * float(max_range); */
+      /*     temp_pt.y = ray_vec(1) * float(max_range); */
+      /*     temp_pt.z = ray_vec(2) * float(max_range); */
+
+      /*     free_vectors_pc->push_back(temp_pt); */
+      /*     /1* } *1/ */
+      /*   } */
+      /* } */
     }
   }
 
   free_vectors_pc->header = pc->header;
-
-  // Voxelize data
-  /* if (hit_pc->size() > 0) { */
-
-  /*   ROS_INFO("[OctomapServer]: size %d", hit_pc->size()); */
-
-  /*   for (int i = 0; i < hit_pc->size(); i++) { */
-
-  /*     const pcl::PointXYZ pt = hit_pc->at(i); */
-  /*     const double        x  = pt.x; */
-  /*     const double        y  = pt.y; */
-  /*     const double        z  = pt.z; */
-
-  /*     if (!std::isfinite(x)) { */
-  /*       ROS_ERROR("NaN detected in variable \"x\"!!!"); */
-  /*     } */
-  /*   } */
-
-  /*   pcl::VoxelGrid<PCLPoint> vg; */
-  /*   vg.setInputCloud(hit_pc); */
-  /*   vg.setLeafSize(0.2, 0.2, 0.2); */
-  /*   PCLPointCloud::Ptr temp_pc; */
-  /*   ROS_INFO("[OctomapServer]: voxel grid in"); */
-  /*   vg.filter(*hit_pc); */
-  /*   ROS_INFO("[OctomapServer]: voxel grid out"); */
-  /* } */
-
-  /* if (free_vectors_pc->size() > 0) { */
-  /*   pcl::VoxelGrid<PCLPoint> vg; */
-  /*   vg.setInputCloud(free_vectors_pc); */
-  /*   vg.setLeafSize(1.0, 1.0, 1.0); */
-  /*   vg.filter(*free_vectors_pc); */
-  /* } */
-
-  /* // filter lone pixels */
-  /* if (hit_pc->size() > 0) { */
-  /*   pcl::StatisticalOutlierRemoval<PCLPoint> sor(true); */
-  /*   sor.setInputCloud(hit_pc); */
-  /*   sor.setMeanK(50.0); */
-  /*   sor.setStddevMulThresh(1.0); */
-  /*   sor.filter(*hit_pc); */
-  /* } */
 
   // transform to the map frame
 
@@ -971,7 +1059,7 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
   hit_pc->header.frame_id          = _world_frame_;
   free_vectors_pc->header.frame_id = _world_frame_;
 
-  insertPointCloud(sensorToWorldTf.transform.translation, hit_pc, free_vectors_pc);
+  insertPointCloud(sensorToWorldTf.transform.translation, hit_pc, free_vectors_pc, free_ray_distance, unknown_clear_occupied);
 
   const octomap::point3d sensor_origin = octomap::pointTfToOctomap(sensorToWorldTf.transform.translation);
 
@@ -1502,7 +1590,7 @@ void OctomapServer::timerAltitudeAlignment([[maybe_unused]] const ros::TimerEven
 /* insertPointCloud() //{ */
 
 void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginTf, const PCLPointCloud::ConstPtr& cloud,
-                                     const PCLPointCloud::ConstPtr& free_vectors_cloud) {
+                                     const PCLPointCloud::ConstPtr& free_vectors_cloud, double free_ray_distance, bool unknown_clear_occupied) {
 
   mrs_lib::ScopeTimer timer = mrs_lib::ScopeTimer("OctomapServer::timerInsertPointCloud", scope_timer_logger_, _scope_timer_enabled_);
 
@@ -1514,7 +1602,7 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
   const octomap::point3d sensor_origin = octomap::pointTfToOctomap(sensorOriginTf);
 
-  const float free_space_ray_len = std::min(float(_unknown_rays_distance_), float(sqrt(2 * pow(local_map_width / 2.0, 2) + pow(local_map_height / 2.0, 2))));
+  const float free_space_ray_len = std::min(float(free_ray_distance), float(sqrt(2 * pow(local_map_width / 2.0, 2) + pow(local_map_height / 2.0, 2))));
 
   octomap::KeySet occupied_cells;
   octomap::KeySet free_cells;
@@ -1563,7 +1651,7 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
       octomap::KeyRay::iterator alterantive_ray_end = keyRay.end();
 
-      if (!_unknown_rays_clear_occupied_) {
+      if (!unknown_clear_occupied) {
 
         for (octomap::KeyRay::iterator it2 = keyRay.begin(), end = keyRay.end(); it2 != end; ++it2) {
 
@@ -2146,6 +2234,12 @@ bool OctomapServer::translateMap(std::shared_ptr<OcTree_t>& octree, const double
 }
 
 //}
+
+/* timeoutGeneric() */ /*//{*/
+void OctomapServer::timeoutGeneric(const std::string& topic, const ros::Time& last_msg, [[maybe_unused]] const int n_pubs) {
+  ROS_WARN_THROTTLE(1.0, "[OctomapServer]: not receiving '%s' for %.3f s", topic.c_str(), (ros::Time::now() - last_msg).toSec());
+}
+/*//}*/
 
 }  // namespace mrs_octomap_server
 
