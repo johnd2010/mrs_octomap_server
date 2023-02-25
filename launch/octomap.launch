@@ -11,6 +11,10 @@
   <arg name="lidar_3d_topic_1_in" default="~REMAP_ME" />
   <arg name="lidar_3d_topic_2_in" default="~REMAP_ME" />
 
+  <arg name="lidar_3d_topic_0_over_max_range_in" default="~REMAP_ME" />
+  <arg name="lidar_3d_topic_1_over_max_range_in" default="~REMAP_ME" />
+  <arg name="lidar_3d_topic_2_over_max_range_in" default="~REMAP_ME" />
+
   <arg name="lidar_2d_topic_0_in" default="~REMAP_ME" />
   <arg name="lidar_2d_topic_1_in" default="~REMAP_ME" />
   <arg name="lidar_2d_topic_2_in" default="~REMAP_ME" />
@@ -67,6 +71,10 @@
       <remap from="~lidar_3d_0_in" to="$(arg lidar_3d_topic_0_in)" />
       <remap from="~lidar_3d_1_in" to="$(arg lidar_3d_topic_1_in)" />
       <remap from="~lidar_3d_2_in" to="$(arg lidar_3d_topic_2_in)" />
+
+      <remap from="~lidar_3d_0_over_max_range_in" to="$(arg lidar_3d_topic_0_over_max_range_in)" />
+      <remap from="~lidar_3d_1_over_max_range_in" to="$(arg lidar_3d_topic_1_over_max_range_in)" />
+      <remap from="~lidar_3d_2_over_max_range_in" to="$(arg lidar_3d_topic_2_over_max_range_in)" />
       <!-- 2D lidar -->
       <remap from="~lidar_2d_0_in" to="$(arg lidar_2d_topic_0_in)" />
       <remap from="~lidar_2d_1_in" to="$(arg lidar_2d_topic_1_in)" />

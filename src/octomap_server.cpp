@@ -608,6 +608,13 @@ void OctomapServer::onInit() {
     sh_3dlaser_pc2_.push_back(
         mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>(shopts, ss.str(), ros::Duration(2.0), &OctomapServer::timeoutGeneric, this,
                                                             std::bind(&OctomapServer::callback3dLidarCloud2, this, std::placeholders::_1, LIDAR_3D, i, false)));
+
+    std::stringstream ss2;
+    ss2 << "lidar_3d_" << i << "_over_max_range_in";
+
+    sh_3dlaser_pc2_.push_back(
+        mrs_lib::SubscribeHandler<sensor_msgs::PointCloud2>(shopts, ss2.str(), ros::Duration(2.0), &OctomapServer::timeoutGeneric, this,
+                                                            std::bind(&OctomapServer::callback3dLidarCloud2, this, std::placeholders::_1, LIDAR_3D, i, true)));
   }
 
   for (int i = 0; i < n_sensors_depth_cam_; i++) {
@@ -931,8 +938,8 @@ void OctomapServer::callback3dLidarCloud2(mrs_lib::SubscribeHandler<sensor_msgs:
   }
 
   // get raycasting parameters
-  double free_ray_distance = 0;
-  bool unknown_clear_occupied = false;
+  double free_ray_distance      = 0;
+  bool   unknown_clear_occupied = false;
   switch (sensor_type) {
     case LIDAR_3D: {
       std::scoped_lock lock(mutex_lut_);
