@@ -1716,7 +1716,7 @@ void OctomapServer::insertPointCloud(const geometry_msgs::Vector3& sensorOriginT
 
   if (!got_root) {
     octomap::OcTreeKey key = octree_local_->coordToKey(0, 0, 0, octree_local_->getTreeDepth());
-    octree_local_->setNodeValue(key, 1.0);
+    octree_local_->setNodeValue(key, octomap::logodds(0.0));
   }
 
   // FREE CELLS
@@ -2047,7 +2047,7 @@ bool OctomapServer::copyInsideBBX2(std::shared_ptr<OcTree_t>& from, std::shared_
 
   if (!got_root) {
     octomap::OcTreeKey key = to->coordToKey(0, 0, 0, to->getTreeDepth());
-    to->setNodeValue(key, 1.0);
+    to->setNodeValue(key, octomap::logodds(0.0));
   }
 
   for (OcTree_t::leaf_bbx_iterator it = from->begin_leafs_bbx(p_min, p_max), end = from->end_leafs_bbx(); it != end; ++it) {
@@ -2074,7 +2074,7 @@ bool OctomapServer::copyLocalMap(std::shared_ptr<OcTree_t>& from, std::shared_pt
 
   if (!got_root) {
     octomap::OcTreeKey key = to->coordToKey(0, 0, 0, to->getTreeDepth());
-    to->setNodeValue(key, 1.0);
+    to->setNodeValue(key, octomap::logodds(0.0));
   }
 
   for (OcTree_t::leaf_iterator it = from->begin_leafs(), end = from->end_leafs(); it != end; ++it) {
