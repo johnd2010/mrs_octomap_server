@@ -22,7 +22,7 @@
   <depend>nodelet</depend>
   <depend>octomap_msgs</depend>
   <depend>octomap_ros</depend>
-  <depend>octomap_tools</depend>
+  <depend>mrs_octomap_tools</depend>
   <depend>pcl_conversions</depend>
   <depend>pcl_msgs</depend>
   <depend>pcl_ros</depend>

@@ -43,7 +43,7 @@
 #include <mrs_lib/mutex.h>
 #include <mrs_lib/scope_timer.h>
 
-#include <octomap_tools/octomap_methods.h>
+#include <mrs_octomap_tools/octomap_methods.h>
 
 #include <mrs_msgs/String.h>
 #include <mrs_msgs/ControlManagerDiagnostics.h>

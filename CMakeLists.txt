@@ -21,7 +21,7 @@ set(CATKIN_DEPENDENCIES
   nodelet
   octomap_msgs
   octomap_ros
-  octomap_tools
+  mrs_octomap_tools
   pcl_conversions
   pcl_msgs
   pcl_ros
