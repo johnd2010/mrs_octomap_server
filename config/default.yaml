@@ -59,7 +59,7 @@ global_map:
   publish_full: true # should publish map with full probabilities?
   publish_binary: false # should publish map with binary occupancy?
 
-# used only when subscribing LaserScan, pointclouds have separate parameters for each sensor
+# used only when subscribing 2D LaserScan, pointclouds have separate parameters for each sensor
 unknown_rays:
   update_free_space: true
   clear_occupied: false # beware, setting this to true is very dangerous
@@ -86,7 +86,7 @@ sensor_params:
       unknown_rays:
         update_free_space: true # update free space when data at the specific point is missing?
         clear_occupied: false # clear occupied voxels using unknown rays? BEWARE, setting this to true is very DANGEROUS
-        free_ray_distance_unknown: 0.2 # [m] ray length for raycasting
+        free_ray_distance_unknown: 10.0 # [m] ray length for raycasting
 
   depth_camera:
 
@@ -106,8 +106,8 @@ sensor_params:
       # what to do when data in the organized pointcloud is missing (is nan)
       unknown_rays:
         update_free_space: true # update free space when data at the specific point is missing?
-        clear_occupied: true # clear occupied voxels using unknown rays? BEWARE, setting this to true is very DANGEROUS
-        free_ray_distance_unknown: 0.2 # [m] ray length for raycasting
+        clear_occupied: false # clear occupied voxels using unknown rays? BEWARE, setting this to true is very DANGEROUS
+        free_ray_distance_unknown: 5.0 # [m] ray length for raycasting
 
   2d_lidar:
 
