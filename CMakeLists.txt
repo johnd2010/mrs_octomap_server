@@ -1,41 +1,55 @@
 cmake_minimum_required(VERSION 3.5)
 project(mrs_octomap_server)
 
-# Override CXX flags inherited from workspace, if precompiled PCL binaries from debian repos are used
-if (DEFINED ENV{PCL_CROSS_COMPILATION})
-  set(PCL_CROSS_COMPILATION $ENV{PCL_CROSS_COMPILATION})
-else()
-  set(PCL_CROSS_COMPILATION "false")
-endif()
-if(${PCL_CROSS_COMPILATION} STREQUAL "false")
-  message("Using precompiled PCL binaries from debian repos. Overriding catkin workspace CMAKE_CXX_FLAGS.")
-  set(CMAKE_CXX_FLAGS "-std=c++17")
-else()
-  message("Using custom-built PCL binaries. Inheriting all CMAKE_CXX_FLAGS from catkin workspace.")
-endif()
+add_definitions(-DOCTOMAP_NODEBUGOUT)
+add_definitions(-O3)
 
-add_definitions("-DOCTOMAP_NODEBUGOUT")
+# disables anoying googletest warning
+set(CATKIN_ENABLE_TESTING FALSE)
 
-set(PACKAGE_DEPENDENCIES
-  roscpp
+# disables anoying PCL warnings
+set(CMAKE_SUPPRESS_DEVELOPER_WARNINGS 1 CACHE INTERNAL "No dev warnings")
+
+set(CATKIN_DEPENDENCIES
   cmake_modules
+  geometry_msgs
+  laser_geometry
+  message_generation
+  message_runtime
+  mrs_lib
+  mrs_msgs
   nodelet
+  octomap_msgs
+  octomap_ros
+  octomap_tools
+  pcl_conversions
+  pcl_msgs
+  pcl_ros
+  roscpp
   sensor_msgs
   std_msgs
-  nav_msgs
-  geometry_msgs
-  pcl_ros
-  pcl_conversions
-  octomap_ros
-  octomap_msgs
-  mrs_lib
-  laser_geometry
-  mrs_msgs
-  octomap_tools
   )
 
-find_package(catkin REQUIRED COMPONENTS ${PACKAGE_DEPENDENCIES})
-find_package(PCL REQUIRED COMPONENTS)
+set(LIBRARIES
+  MrsOctomapServer_Server
+  )
+
+find_package(OpenMP REQUIRED)
+
+find_package(octomap REQUIRED)
+
+find_package(PCL REQUIRED COMPONENTS
+  common
+  )
+
+# include Eigen3
+find_package(Eigen3 REQUIRED)
+set(Eigen_INCLUDE_DIRS ${EIGEN3_INCLUDE_DIRS})
+set(Eigen_LIBRARIES ${Eigen_LIBRARIES})
+
+find_package(catkin REQUIRED COMPONENTS
+  ${CATKIN_DEPENDENCIES}
+  )
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -45,15 +59,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # add_link_options("-fsanitize=address")
 
 add_compile_options("${PCL_COMPILE_OPTIONS}")
-
-find_package(OpenMP REQUIRED)
-
-find_package(octomap REQUIRED)
-
-# include Eigen3
-find_package(Eigen3 REQUIRED)
-set(Eigen_INCLUDE_DIRS ${EIGEN3_INCLUDE_DIRS})
-set(Eigen_LIBRARIES ${Eigen_LIBRARIES})
 
 add_message_files(DIRECTORY msg FILES
   PoseWithSize.msg
@@ -66,8 +71,8 @@ generate_messages(DEPENDENCIES
 
 catkin_package(
   INCLUDE_DIRS include
-  LIBRARIES MrsOctomapServer
-  CATKIN_DEPENDS ${PACKAGE_DEPENDENCIES}
+  LIBRARIES ${LIBRARIES}
+  CATKIN_DEPENDS ${CATKIN_DEPENDENCIES}
   DEPENDS OCTOMAP
   )
 
@@ -83,22 +88,42 @@ link_directories(
   ${PCL_LIBRARIES}
 )
 
-# MrsOctomapServer
+# Server
 
-add_library(MrsOctomapServer
+add_library(MrsOctomapServer_Server
   src/octomap_server.cpp
   src/conversions.cpp
   )
 
-add_dependencies(MrsOctomapServer
+add_dependencies(MrsOctomapServer_Server
   ${${PROJECT_NAME}_EXPORTED_TARGETS}
   ${catkin_EXPORTED_TARGETS}
   )
 
-target_include_directories(MrsOctomapServer PUBLIC ${PCL_INCLUDE_DIRS})
+target_include_directories(MrsOctomapServer_Server PUBLIC
+  ${PCL_INCLUDE_DIRS}
+  )
 
-target_link_libraries(MrsOctomapServer
+target_link_libraries(MrsOctomapServer_Server
   ${catkin_LIBRARIES}
   ${PCL_LIBRARIES}
   ${OCTOMAP_LIBRARIES}
+  )
+
+## --------------------------------------------------------------
+## |                           Install                          |
+## --------------------------------------------------------------
+
+install(TARGETS ${LIBRARIES}
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_GLOBAL_BIN_DESTINATION}
+  )
+
+install(DIRECTORY launch config
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+  )
+
+install(FILES nodelets.xml
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
   )
