@@ -1,0 +1,25 @@
+{
+  "configurations": [
+    {
+      "browse": {
+        "databaseFilename": "${default}",
+        "limitSymbolsToIncludedHeaders": false
+      },
+      "includePath": [
+        "/home/colorfulcraze/John/devel/include/**",
+        "/opt/ros/noetic/include/**",
+        "/home/colorfulcraze/John/src/multi-greedy-explore/explore/include/**",
+        "/home/colorfulcraze/John/src/mrs_octomap_server/include/**",
+        "/home/colorfulcraze/John/src/multi-greedy-explore/map_merge/include/**",
+        "/home/colorfulcraze/John/src/frontier_publisher/explore/include/**",
+        "/usr/include/**"
+      ],
+      "name": "ROS",
+      "intelliSenseMode": "gcc-x64",
+      "compilerPath": "/usr/bin/gcc",
+      "cStandard": "gnu11",
+      "cppStandard": "c++14"
+    }
+  ],
+  "version": 4
+}
