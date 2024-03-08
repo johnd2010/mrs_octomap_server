@@ -1,5 +1,10 @@
 <launch>
 
+  <arg name="pointcloud_min_x" default="-50" />
+  <arg name="pointcloud_min_y" default="-50" />
+  <arg name="pointcloud_max_x" default="50" />
+  <arg name="pointcloud_max_y" default="50" />
+
   <arg name="UAV_NAME" default="$(optenv UAV_NAME uav1)" />
   <arg name="RUN_TYPE" default="$(optenv RUN_TYPE)" />
 
@@ -59,6 +64,12 @@
 
       <param name="uav_name" type="string" value="$(arg UAV_NAME)" />
       <param name="simulation" type="bool" value="$(arg simulation)" />
+
+      <param name="pointcloud_min_x" value="$(arg pointcloud_min_x)" />
+      <param name="pointcloud_min_y" value="$(arg pointcloud_min_y)" />
+      <param name="pointcloud_max_x" value="$(arg pointcloud_max_x)" />
+      <param name="pointcloud_max_y" value="$(arg pointcloud_max_y)" />
+
 
       <param name="world_frame_id" type="string" value="$(arg world_frame_id)" />
       <param name="robot_frame_id" type="string" value="$(arg robot_frame_id)" />
