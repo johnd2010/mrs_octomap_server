@@ -359,7 +359,7 @@ void handleOccupiedNode(const OcTree_t::iterator& it);
 
 void handleFreeNode(const OcTree_t::iterator& it);
 
-void handleOccupiedNodeInBBX(const OcTree_t::iterator& it);
+void handleOccupiedNodeInBBX(const OcTree_t::iterator& it);  //change this back for occupancy grid to detect obstacles
 
 void handleFreeNodeInBBX(const OcTree_t::iterator& it);
 

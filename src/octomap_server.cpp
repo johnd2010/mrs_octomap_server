@@ -227,7 +227,7 @@ void OctomapServer::onInit() {
   octree_global_->setClampingThresMax(_thresMax_);
   octree_global_treeDepth = octree_global_->getTreeDepth();
   octree_global_maxTreeDepth = octree_global_treeDepth;
-  // octree_global_gridmap.info.resolution = octree_global_res;
+  octree_global_gridmap.info.resolution = octree_global_res;
 
   octree_local_0_ = std::make_shared<OcTree_t>(octree_resolution_);
   octree_local_0_->setProbHit(_probHit_);
