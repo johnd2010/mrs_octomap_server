@@ -683,51 +683,51 @@ void OctomapServer::timerLocalMapPublisher([[maybe_unused]] const ros::TimerEven
     return;
   }
 
-  // if (_local_map_publish_full_) {
+  if (_local_map_publish_full_) {
 
-  //   octomap_msgs::Octomap map;
-  //   map.header.frame_id = _world_frame_;
-  //   map.header.stamp    = ros::Time::now();  // TODO
+    octomap_msgs::Octomap map;
+    map.header.frame_id = _world_frame_;
+    map.header.stamp    = ros::Time::now();  // TODO
 
-  //   bool success = false;
+    bool success = false;
 
-  //   {
-  //     std::scoped_lock lock(mutex_octree_local_);
+    {
+      std::scoped_lock lock(mutex_octree_local_);
 
-  //     mrs_lib::ScopeTimer timer = mrs_lib::ScopeTimer("OctomapServer::localMapFullPublish", scope_timer_logger_, _scope_timer_enabled_);
+      mrs_lib::ScopeTimer timer = mrs_lib::ScopeTimer("OctomapServer::localMapFullPublish", scope_timer_logger_, _scope_timer_enabled_);
 
-  //     success = octomap_msgs::fullMapToMsg(*octree_local_, map);
-  //   }
+      success = octomap_msgs::fullMapToMsg(*octree_local_, map);
+    }
 
-  //   if (success) {
-  //     pub_map_local_full_.publish(map);
-  //   } else {
-  //     ROS_ERROR("[OctomapServer]: error serializing local octomap to full representation");
-  //   }
-  // }
+    if (success) {
+      pub_map_local_full_.publish(map);
+    } else {
+      ROS_ERROR("[OctomapServer]: error serializing local octomap to full representation");
+    }
+  }
 
-  // if (_local_map_publish_binary_) {
+  if (_local_map_publish_binary_) {
 
-  //   octomap_msgs::Octomap map;
-  //   map.header.frame_id = _world_frame_;
-  //   map.header.stamp    = ros::Time::now();  // TODO
+    octomap_msgs::Octomap map;
+    map.header.frame_id = _world_frame_;
+    map.header.stamp    = ros::Time::now();  // TODO
 
-  //   bool success = false;
+    bool success = false;
 
-  //   {
-  //     std::scoped_lock lock(mutex_octree_local_);
+    {
+      std::scoped_lock lock(mutex_octree_local_);
 
-  //     mrs_lib::ScopeTimer timer = mrs_lib::ScopeTimer("OctomapServer::localMapBinaryPublish", scope_timer_logger_, _scope_timer_enabled_);
+      mrs_lib::ScopeTimer timer = mrs_lib::ScopeTimer("OctomapServer::localMapBinaryPublish", scope_timer_logger_, _scope_timer_enabled_);
 
-  //     success = octomap_msgs::binaryMapToMsg(*octree_local_, map);
-  //   }
+      success = octomap_msgs::binaryMapToMsg(*octree_local_, map);
+    }
 
-  //   if (success) {
-  //     pub_map_local_binary_.publish(map);
-  //   } else {
-  //     ROS_ERROR("[OctomapServer]: error serializing local octomap to binary representation");
-  //   }
-  // }
+    if (success) {
+      pub_map_local_binary_.publish(map);
+    } else {
+      ROS_ERROR("[OctomapServer]: error serializing local octomap to binary representation");
+    }
+  }
 }
 
 //}
@@ -1384,7 +1384,7 @@ void OctomapServer::publishProjected2DMap(const ros::Time& rostime) {
 
 void OctomapServer::handleOccupiedNode(const OcTree_t::iterator& it){
   if (octree_global_projectCompleteMap){
-    update2DMap(it, false);
+    update2DMap(it, true);
   }
 }
 
@@ -1396,7 +1396,7 @@ void OctomapServer::handleFreeNode(const OcTree_t::iterator& it){
 
 void OctomapServer::handleOccupiedNodeInBBX(const OcTree_t::iterator& it){
   if (!octree_global_projectCompleteMap){
-    update2DMap(it, false);
+    update2DMap(it, true);
   }
 }
 

@@ -10,3 +10,4 @@
 # Runtime-python
 *.pyc
 build/*
+*.txt
